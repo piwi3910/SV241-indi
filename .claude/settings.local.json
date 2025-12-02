@@ -20,7 +20,12 @@
       "Bash(start dnSpy/dnSpy.exe)",
       "Bash(cmake:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(tree:*)",
+      "Bash(git -C /Users/pascal/Documents/git/SV241-indi log --oneline -10)",
+      "Bash(git -C /Users/pascal/Documents/git/SV241-indi ls-files:*)",
+      "Bash(git -C /Users/pascal/Documents/git/SV241-indi log --all --oneline --graph)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []
