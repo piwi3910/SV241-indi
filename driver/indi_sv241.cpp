@@ -277,11 +277,22 @@ bool SV241::sendCommand(uint8_t cmdId, uint8_t param1, uint8_t param2)
 
     tcflush(PortFD, TCIFLUSH);  // Clear input buffer
 
-    ssize_t written = write(PortFD, cmd, 6);
-    if (written != 6)
+    // Loop-based write to handle partial writes
+    size_t totalWritten = 0;
+    while (totalWritten < 6)
     {
-        LOG_ERROR("Failed to write command");
-        return false;
+        ssize_t written = write(PortFD, cmd + totalWritten, 6 - totalWritten);
+        if (written < 0)
+        {
+            LOGF_ERROR("Write error: %s", strerror(errno));
+            return false;
+        }
+        if (written == 0)
+        {
+            LOG_ERROR("Write returned 0 bytes");
+            return false;
+        }
+        totalWritten += written;
     }
 
     usleep(COMMAND_DELAY_US);  // Wait 50ms for device to process
@@ -293,31 +304,72 @@ bool SV241::readResponse(uint8_t *buffer, size_t len, uint8_t expectedCmd)
     if (PortFD < 0)
         return false;
 
-    ssize_t bytesRead = read(PortFD, buffer, len);
+    // Use poll() for precise timeout handling
+    struct pollfd pfd;
+    pfd.fd = PortFD;
+    pfd.events = POLLIN;
 
-    if (bytesRead > 0)
+    // Loop-based read to handle partial reads with poll() timeout
+    size_t totalRead = 0;
+    while (totalRead < len)
     {
-        LOGF_DEBUG("RX (%zd bytes): %02X %02X %02X %02X %02X %02X %02X %02X",
-                   bytesRead,
-                   bytesRead > 0 ? buffer[0] : 0,
-                   bytesRead > 1 ? buffer[1] : 0,
-                   bytesRead > 2 ? buffer[2] : 0,
-                   bytesRead > 3 ? buffer[3] : 0,
-                   bytesRead > 4 ? buffer[4] : 0,
-                   bytesRead > 5 ? buffer[5] : 0,
-                   bytesRead > 6 ? buffer[6] : 0,
-                   bytesRead > 7 ? buffer[7] : 0);
+        // Wait for data with timeout
+        int pollResult = poll(&pfd, 1, READ_TIMEOUT_MS);
+        if (pollResult < 0)
+        {
+            LOGF_ERROR("Poll error: %s", strerror(errno));
+            tcflush(PortFD, TCIOFLUSH);
+            return false;
+        }
+        if (pollResult == 0)
+        {
+            // Timeout - no data available
+            LOG_DEBUG("Read timeout waiting for data");
+            break;
+        }
+
+        // Data is available, read it
+        ssize_t bytesRead = read(PortFD, buffer + totalRead, len - totalRead);
+        if (bytesRead < 0)
+        {
+            LOGF_ERROR("Read error: %s", strerror(errno));
+            tcflush(PortFD, TCIOFLUSH);
+            return false;
+        }
+        if (bytesRead == 0)
+        {
+            // EOF - connection closed
+            LOG_ERROR("Read returned 0 bytes (EOF)");
+            break;
+        }
+        totalRead += bytesRead;
     }
 
-    if (bytesRead != static_cast<ssize_t>(len))
+    if (totalRead > 0)
     {
-        LOGF_ERROR("Expected %zu bytes, got %zd", len, bytesRead);
+        LOGF_DEBUG("RX (%zu bytes): %02X %02X %02X %02X %02X %02X %02X %02X",
+                   totalRead,
+                   totalRead > 0 ? buffer[0] : 0,
+                   totalRead > 1 ? buffer[1] : 0,
+                   totalRead > 2 ? buffer[2] : 0,
+                   totalRead > 3 ? buffer[3] : 0,
+                   totalRead > 4 ? buffer[4] : 0,
+                   totalRead > 5 ? buffer[5] : 0,
+                   totalRead > 6 ? buffer[6] : 0,
+                   totalRead > 7 ? buffer[7] : 0);
+    }
+
+    if (totalRead != len)
+    {
+        LOGF_ERROR("Expected %zu bytes, got %zu", len, totalRead);
+        tcflush(PortFD, TCIOFLUSH);
         return false;
     }
 
     if (buffer[2] != expectedCmd)
     {
         LOGF_ERROR("Unexpected response command: expected %02X, got %02X", expectedCmd, buffer[2]);
+        tcflush(PortFD, TCIOFLUSH);
         return false;
     }
 

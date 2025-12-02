@@ -25,6 +25,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <poll.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -163,4 +164,5 @@ private:
     // Timing
     static constexpr int COMMAND_DELAY_US = 50000;  // 50ms
     static constexpr int POLL_INTERVAL_MS = 5000;   // 5 seconds
+    static constexpr int READ_TIMEOUT_MS = 1000;    // 1 second read timeout
 };
