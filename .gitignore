@@ -1,0 +1,54 @@
+# Build files
+build/
+*.o
+*.so
+*.a
+*.exe
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+*.egg
+
+# Logs and captures
+*.log
+*.txt
+serial_*.txt
+decompile_output.txt
+assembly_inspection.txt
+
+# Downloaded tools
+dnSpy/
+dnSpy.zip
+ILSpy.zip
+
+# Decompiled output (keep source but not binary decompilation artifacts)
+decompiled/
+
+# Temporary files
+*.tmp
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Original desktop app (keep for reference but mark as binary)
+new-svbonyhubControl*/
