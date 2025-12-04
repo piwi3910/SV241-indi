@@ -9,11 +9,6 @@ INDI driver for the SVBONY SV241 Powerbox, enabling control from Linux and macOS
 - **Hardware Testing**: ✅ VERIFIED (macOS)
 - **Release**: PENDING
 
-## Quick Links
-
-- **[Complete Protocol Documentation](docs/SV241_PROTOCOL.md)** - Full command reference.
-- **[Project Summary](docs/PROJECT_SUMMARY.md)** - Development history and technical details.
-
 ## What is the SV241?
 
 The SVBONY SV241 is an astronomy power distribution box with:
@@ -39,7 +34,8 @@ The repository has been cleaned up to focus solely on the C++ driver.
 
 ```
 sv241-indi/
-├── docs/                   # Protocol and project documentation
+├── docs/                   # Protocol documentation
+│   └── SV241_PROTOCOL.md
 ├── driver/                 # INDI driver source code (C++)
 │   ├── build/              # Build directory
 │   ├── indi_sv241.cpp      # Driver implementation
@@ -50,32 +46,34 @@ sv241-indi/
 └── README.md               # This file
 ```
 
-## Serial Port Behavior and Workaround
+## Technical Deep Dive: The Serial Port Reset Issue
 
-A significant challenge during development was that the SV241 device, which is based on an ESP32, would reset every time the serial port was closed on macOS and Linux. This is not standard behavior for serial devices and is not handled by default INDI connection libraries.
+A major hurdle in this project was a hardware-specific issue where the SV241 device would reset upon closing the serial port on POSIX-compliant systems (Linux and macOS). This behavior prevented reliable operation, as any client disconnection would reboot the powerbox, turning off all equipment.
 
-- **The Cause**: On POSIX-compliant systems (like Linux and macOS), the default behavior is to set the `HUPCL` (Hang-Up on Close) flag for serial devices. When the last process closes the port, the kernel sends a "hang-up" signal by lowering the DTR (Data Terminal Ready) line. The ESP32's USB-to-serial chip is wired to use the DTR line to trigger a reset, putting the chip into bootloader mode.
+### The Root Cause: `HUPCL` and ESP32 Reset Circuit
 
-- **The Solution**: We worked around this by bypassing higher-level serial libraries and using low-level `termios` system calls to manually configure the port. Specifically, we disable the `HUPCL` flag right after the port is opened.
+- **Device Behavior**: The SV241 is based on an ESP32 microcontroller, which uses a common USB-to-Serial chip (CH340). On these development boards, the DTR (Data Terminal Ready) and RTS (Request To Send) serial lines are often cross-wired to the ESP32's `EN` (Enable) and `GPIO0` pins. This design allows for automatic flashing by using the serial lines to put the chip into bootloader mode.
 
-This is the key code snippet from `driver/indi_sv241.cpp`:
-```cpp
-// In openSerialPort()
-#include <termios.h>
+- **Operating System Behavior**: On Linux and macOS, the default serial port configuration includes the `HUPCL` (Hang-Up on Close) flag. When the last process with an open file handle to the serial port closes it, the OS kernel sends a "hang-up" signal by de-asserting (lowering) the DTR line.
 
-// ... open file descriptor ...
+- **The Conflict**: The toggling of the DTR line by the OS on port close was triggering the ESP32's reset-to-bootloader mechanism, causing the entire powerbox to reboot. This is why the device worked on Windows (which does not enforce `HUPCL` in the same way) but failed on POSIX systems.
 
-struct termios options;
-tcgetattr(PortFD, &options);
+### The Solution: Manual `termios` Configuration
 
-// ... set baud, etc ...
+Standard serial libraries, including the INDI `Connection::Serial` class, do not expose the low-level controls needed to disable the `HUPCL` flag. To solve this, we had to bypass these abstractions and directly configure the serial port using `termios` system calls.
 
-// IMPORTANT: Disable HUPCL to prevent DTR drop on close
-options.c_cflag &= ~HUPCL;
+The final C++ driver implements the following logic in its `openSerialPort` method:
 
-tcsetattr(PortFD, TCSANOW, &options);
-```
-This fix ensures that closing the serial port does not cause the device to reset, allowing for stable, repeated connections.
+1.  **Open the Port**: The serial device file is opened using a standard `open()` system call to get a raw file descriptor.
+2.  **Get Attributes**: The existing terminal attributes are fetched using `tcgetattr()`.
+3.  **Disable `HUPCL`**: The `c_cflag` member of the `termios` struct is modified to remove the `HUPCL` flag. This is the critical step.
+    ```cpp
+    options.c_cflag &= ~HUPCL;
+    ```
+4.  **Set Other Flags**: Baud rate, character size (8N1), and raw input mode are configured.
+5.  **Set Attributes**: The modified attributes are applied back to the port using `tcsetattr()`.
+
+This low-level control prevents the kernel from dropping the DTR line on close, which completely resolves the reset issue and makes the driver stable for INDI use.
 
 ## Development
 
@@ -126,7 +124,14 @@ This will:
 
 ## Roadmap
 
-- [x] **Phase 1: Protocol Research**: Reverse engineer and document protocol.
-- [x] **Phase 2: Driver Development**: Implement a stable C++ driver.
-- [ ] **Phase 3: Testing**: Perform wider testing on different platforms (Linux, Raspberry Pi) and with different clients (KStars, Ekos).
-- [ ] **Phase 4: Release**: Submit to the INDI 3rd party drivers repository and create installation packages.
+With a stable C++ driver, the next phases focus on testing and distribution:
+
+- **Phase 1: Wider Testing**:
+    - Test on a dedicated Linux machine (e.g., Ubuntu).
+    - Test on a Raspberry Pi-based astronomy setup (e.g., Stellarmate, Astroberry).
+    - Test with different INDI clients (KStars/Ekos, N.I.N.A., etc.).
+
+- **Phase 2: Distribution**:
+    - Write a user manual for installation and use.
+    - Submit the driver to the official INDI 3rd-party repository.
+    - Create installation packages if feasible.
