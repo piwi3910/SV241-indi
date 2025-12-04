@@ -26,8 +26,10 @@
 #include <cstdint>
 #include <cstring>
 #include <poll.h>
+#include <string>
 #include <termios.h>
 #include <unistd.h>
+#include <vector>
 
 /**
  * @brief INDI Driver for SVBONY SV241 Powerbox
@@ -67,6 +69,27 @@ private:
     uint8_t calcChecksum(const uint8_t *cmd);
     bool openSerialPort();
     void closeSerialPort();
+
+    // Extended protocol (JSON) communication
+    bool sendExtendedCommand(const std::string &jsonCmd, std::string &response);
+    bool detectExtendedFirmware();
+    bool parseJsonResponse(const std::string &json, std::string &error);
+
+    // Extended protocol functions
+    bool extGetStatus();
+    bool extGetDewStatus();
+    bool extSetDewConfig(int channel, bool autoMode, double margin);
+    bool extGetStats();
+    bool extStatsReset();
+    bool extGetAlerts();
+    bool extGetAlertConfig();
+    bool extSetAlertConfig();
+    bool extGetDiagnostics();
+    bool extGetCalibration();
+    bool extSetCalibration(double vOffset, double tOffset, double hOffset);
+    bool extI2CRecovery();
+    bool extGetNames();
+    bool extSetName(int idx, const std::string &name);
 
     // Device control functions
     bool setDCOutput(int channel, bool enabled);
@@ -109,6 +132,48 @@ private:
     // Calculated PWM13 voltage display
     INDI::PropertyNumber PWM13VoltageNP{1};
 
+    // Extended firmware features (only shown if extended firmware detected)
+    // Dew point and auto-dew controls
+    INDI::PropertyNumber DewPointNP{1};
+    INDI::PropertySwitch AutoDew14SP{2};
+    INDI::PropertySwitch AutoDew15SP{2};
+    INDI::PropertyNumber DewMargin14NP{1};
+    INDI::PropertyNumber DewMargin15NP{1};
+
+    // Session statistics
+    INDI::PropertyNumber StatsVoltageNP{3};  // min, max, avg
+    INDI::PropertyNumber StatsPowerNP{2};    // max, total (Wh)
+    INDI::PropertyNumber StatsTempNP{2};     // min, max
+    INDI::PropertyNumber UptimeNP{1};
+
+    // Alert status
+    INDI::PropertyLight AlertsLP{4};  // low_v, crit_v, thermal, i2c_fail
+
+    // Diagnostics
+    INDI::PropertyNumber DiagnosticsNP{1};   // free heap
+    INDI::PropertyLight SensorStatusLP{3};   // i2c_ok, ina219_ok, sht4x_ok
+
+    // Firmware info
+    INDI::PropertyText FirmwareTP{2};  // version, capabilities
+
+    // Calibration offsets
+    INDI::PropertyNumber CalibrationNP{3};  // v_offset, t_offset, h_offset
+
+    // Alert configuration
+    INDI::PropertyNumber AlertConfigNP{3};  // low_v_thresh, crit_v_thresh
+    INDI::PropertySwitch AlertLowVSP{2};    // enable/disable low voltage alert
+    INDI::PropertySwitch AlertCritVSP{2};   // enable/disable critical voltage alert
+    INDI::PropertySwitch AlertAutoOffSP{2}; // enable/disable auto-off on critical
+
+    // I2C Recovery button
+    INDI::PropertySwitch I2CRecoverySP{1};  // trigger I2C recovery
+
+    // Stats reset button
+    INDI::PropertySwitch StatsResetSP{1};   // reset session statistics
+
+    // Port names (custom labels)
+    INDI::PropertyText PortNamesTP{10};  // DC1-DC5, USB12, USB345, PWM13-PWM15
+
     // Internal state
     double currentVoltage{0.0};
     double currentPower{0.0};
@@ -120,6 +185,31 @@ private:
     bool dcStates[7]{false};  // DC1-DC5, USB12, USB345
     uint8_t pwmValues[3]{0};  // PWM13, PWM14, PWM15
 
+    // Extended firmware state
+    bool hasExtendedFirmware{false};
+    std::string firmwareVersion;
+    std::vector<std::string> firmwareCapabilities;
+    double dewPoint{0.0};
+    bool autoDew14{false};
+    bool autoDew15{false};
+    double dewMargin14{5.0};
+    double dewMargin15{5.0};
+
+    // Calibration state
+    double calVOffset{0.0};
+    double calTOffset{0.0};
+    double calHOffset{0.0};
+
+    // Alert config state
+    bool alertLowVEnabled{true};
+    double alertLowVThreshold{11.5};
+    bool alertCritVEnabled{true};
+    double alertCritVThreshold{11.0};
+    bool alertAutoOff{true};
+
+    // Port names state
+    std::string portNames[10];  // DC1-DC5, USB12, USB345, PWM13-PWM15
+
     // Protocol constants
     static constexpr uint8_t CMD_HEADER = 0x24;
     static constexpr uint8_t CMD_LENGTH = 0x06;
@@ -130,6 +220,7 @@ private:
     static constexpr uint8_t CMD_READ_HUMIDITY = 0x06;
     static constexpr uint8_t CMD_READ_POWER = 0x07;
     static constexpr uint8_t CMD_SYNC_STATES = 0x08;
+    static constexpr uint8_t CMD_EXTENDED = 0x10;  // Extended JSON protocol
 
     // Response sizes
     static constexpr size_t SYNC_RESPONSE_SIZE = 14;

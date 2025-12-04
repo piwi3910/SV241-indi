@@ -9,7 +9,44 @@ INDI driver for the SVBONY SV241 Powerbox, enabling control from Linux-based ast
 | Protocol Research | ✅ Complete |
 | Hardware Testing | ✅ Verified |
 | INDI Driver | ✅ Complete |
-| Custom Firmware | ✅ Available |
+| Basic Firmware (v1.x) | ✅ Available |
+| **Extended Firmware (v2.0)** | ✅ **NEW** |
+
+## What's New in v2.0
+
+The extended firmware adds powerful new features while maintaining full backward compatibility:
+
+### Auto Dew Control
+- **Automatic dew heater management** - Set a temperature margin above dew point and let the firmware handle heater power
+- **PID controller** - Smooth, intelligent power adjustments
+- **Per-channel configuration** - Independent settings for each dew heater
+
+### Session Statistics
+- **Voltage tracking** - Min, max, and average voltage
+- **Power monitoring** - Peak power and total energy consumption (Wh)
+- **Temperature history** - Min/max ambient temperature
+- **Uptime tracking** - Time since power-on
+
+### Voltage Alerts
+- **Low voltage warning** - Configurable threshold (default: 11.5V)
+- **Critical voltage alert** - Configurable threshold (default: 11.0V)
+- **Auto-shutdown** - Optionally disable non-essential ports on critical voltage
+
+### Sensor Calibration
+- **Voltage offset** - Compensate for measurement drift
+- **Temperature offset** - Calibrate against reference thermometer
+- **Humidity offset** - Fine-tune humidity readings
+
+### Port Naming
+- **Custom labels** - Name your ports (e.g., "Mount", "Camera", "Guide Scope")
+- **EEPROM storage** - Names persist across power cycles
+
+### Diagnostics
+- **I2C health monitoring** - Track sensor communication status
+- **Manual I2C recovery** - Force bus recovery if needed
+- **Heap monitoring** - Track available memory
+
+See [firmware/SV241_Extended/README.md](firmware/SV241_Extended/README.md) for complete details.
 
 ## What is the SV241?
 
@@ -42,28 +79,36 @@ The INDI driver works with the **original factory firmware**, but there are know
 
 3. **Serial Reconnection Issues** - First read after reconnecting may fail
 
-### Recommended: Custom Firmware
+### Recommended: Extended Firmware (v2.0)
 
-We've created a **custom firmware** that fixes these issues:
+We've created an **extended firmware** that fixes these issues AND adds powerful new features:
 
 ✅ **Automatic I2C bus recovery** - Detects and fixes sensor lockups
 ✅ **On-demand recovery** - Each sensor read includes retry logic
 ✅ **Startup bus reset** - Clears issues from previous sessions
 ✅ **100% protocol compatible** - Works with INDI driver and Windows app
+✅ **Auto dew heater control** - Automatic power management based on dew point
+✅ **Session statistics** - Track voltage, power, and temperature over time
+✅ **Voltage alerts** - Get warnings before battery runs low
+✅ **Sensor calibration** - Fine-tune sensor readings
+✅ **Custom port names** - Label your equipment connections
 
-**See [`firmware/README.md`](firmware/README.md) for:**
-- Detailed explanation of bugs found
-- What the custom firmware fixes
+**See [`firmware/SV241_Extended/README.md`](firmware/SV241_Extended/README.md) for:**
+- Complete feature documentation
 - Pre-built binary for easy flashing
 - Build instructions if you want to compile yourself
 
-### Quick Flash (Pre-Built Binary)
+**See [`firmware/README.md`](firmware/README.md) for:**
+- Detailed explanation of bugs found in original firmware
+- Basic firmware (v1.x) without extended features
+
+### Quick Flash Extended Firmware (Recommended)
 
 ```bash
 pip install esptool
 
 esptool --chip esp32 --port /dev/ttyUSB0 --baud 115200 --no-stub \
-  write-flash 0x0 firmware/SV241_Custom/SV241_Custom.merged.bin
+  write-flash 0x0 firmware/SV241_Extended/SV241_Extended.ino.merged.bin
 ```
 
 ## Features
@@ -96,20 +141,27 @@ sv241-indi/
 │   ├── indi_sv241.xml         # INDI device descriptor
 │   └── CMakeLists.txt         # Build configuration
 │
-├── firmware/                  # Custom firmware
-│   ├── README.md              # Firmware documentation & bugs
-│   └── SV241_Custom/          # Arduino sketch + pre-built binary
-│       ├── SV241_Custom.ino   # Firmware source
-│       └── SV241_Custom.merged.bin  # Pre-built (flash at 0x0)
+├── firmware/                  # Firmware options
+│   ├── README.md              # Basic firmware docs & bug analysis
+│   ├── SV241_Custom/          # Basic firmware (v1.x)
+│   │   ├── SV241_Custom.ino   # Source code
+│   │   └── SV241_Custom.merged.bin
+│   │
+│   └── SV241_Extended/        # Extended firmware (v2.0) - RECOMMENDED
+│       ├── README.md          # Complete feature documentation
+│       ├── SV241_Extended.ino # Source code
+│       └── SV241_Extended.ino.merged.bin
 │
 ├── scripts/                   # Testing & utility scripts
-│   ├── test_custom_firmware.py    # Firmware validation
+│   ├── test_extended_firmware.py  # Full v2.0 test suite
+│   ├── test_custom_firmware.py    # Basic firmware validation
 │   ├── stress_test_sensors.py     # Long-duration stability test
 │   ├── reconnect_stress_test.py   # Connection cycling test
 │   └── continuous_test.py         # Continuous polling test
 │
 ├── docs/                      # Documentation
-│   ├── SV241_PROTOCOL.md      # Complete protocol reference
+│   ├── SV241_PROTOCOL.md      # Binary protocol reference
+│   ├── EXTENDED_PROTOCOL.md   # Extended JSON protocol reference
 │   └── ...
 │
 └── README.md                  # This file
@@ -240,7 +292,10 @@ See [docs/SV241_PROTOCOL.md](docs/SV241_PROTOCOL.md) for complete protocol docum
 Several Python scripts are included for testing:
 
 ```bash
-# Test all firmware commands
+# Test extended firmware v2.0 (recommended)
+python scripts/test_extended_firmware.py /dev/ttyUSB0
+
+# Test basic firmware commands
 python scripts/test_custom_firmware.py /dev/ttyUSB0
 
 # Long-duration stability test (10 minutes)

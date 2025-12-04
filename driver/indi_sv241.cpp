@@ -23,12 +23,81 @@
 #include <libindi/indicom.h>
 #include <libindi/connectionplugins/connectionserial.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fcntl.h>
 #include <memory>
+#include <sstream>
 #include <termios.h>
 #include <unistd.h>
+
+// Simple JSON parsing helpers (minimal implementation to avoid dependencies)
+namespace {
+    std::string getJsonString(const std::string &json, const std::string &key) {
+        std::string search = "\"" + key + "\":\"";
+        size_t pos = json.find(search);
+        if (pos == std::string::npos) return "";
+        pos += search.length();
+        size_t end = json.find("\"", pos);
+        if (end == std::string::npos) return "";
+        return json.substr(pos, end - pos);
+    }
+
+    double getJsonDouble(const std::string &json, const std::string &key, double defaultVal = 0.0) {
+        std::string search = "\"" + key + "\":";
+        size_t pos = json.find(search);
+        if (pos == std::string::npos) return defaultVal;
+        pos += search.length();
+        // Skip whitespace
+        while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t')) pos++;
+        // Find end of number
+        size_t end = pos;
+        while (end < json.length() && (isdigit(json[end]) || json[end] == '.' || json[end] == '-')) end++;
+        if (end == pos) return defaultVal;
+        try {
+            return std::stod(json.substr(pos, end - pos));
+        } catch (...) {
+            return defaultVal;
+        }
+    }
+
+    bool getJsonBool(const std::string &json, const std::string &key, bool defaultVal = false) {
+        std::string search = "\"" + key + "\":";
+        size_t pos = json.find(search);
+        if (pos == std::string::npos) return defaultVal;
+        pos += search.length();
+        while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t')) pos++;
+        if (pos + 4 <= json.length() && json.substr(pos, 4) == "true") return true;
+        if (pos + 5 <= json.length() && json.substr(pos, 5) == "false") return false;
+        return defaultVal;
+    }
+
+    int getJsonInt(const std::string &json, const std::string &key, int defaultVal = 0) {
+        return static_cast<int>(getJsonDouble(json, key, defaultVal));
+    }
+
+    std::vector<std::string> getJsonStringArray(const std::string &json, const std::string &key) {
+        std::vector<std::string> result;
+        std::string search = "\"" + key + "\":[";
+        size_t pos = json.find(search);
+        if (pos == std::string::npos) return result;
+        pos += search.length();
+        size_t end = json.find("]", pos);
+        if (end == std::string::npos) return result;
+        std::string arr = json.substr(pos, end - pos);
+        // Parse array elements
+        size_t start = 0;
+        while ((start = arr.find("\"", start)) != std::string::npos) {
+            start++;
+            size_t strEnd = arr.find("\"", start);
+            if (strEnd == std::string::npos) break;
+            result.push_back(arr.substr(start, strEnd - start));
+            start = strEnd + 1;
+        }
+        return result;
+    }
+}
 
 // Singleton instance
 static std::unique_ptr<SV241> sv241(new SV241());
@@ -111,6 +180,111 @@ bool SV241::initProperties()
     HumidityNP[0].fill("HUMIDITY", "Humidity (%)", "%.1f", 0, 100, 0.1, 0);
     HumidityNP.fill(getDeviceName(), "HUMIDITY", "Humidity", "Sensors", IP_RO, 60, IPS_IDLE);
 
+    // Extended firmware properties (initialized but only shown if extended firmware detected)
+    // Dew point
+    DewPointNP[0].fill("DEW_POINT", "Dew Point (C)", "%.1f", -40, 85, 0.1, 0);
+    DewPointNP.fill(getDeviceName(), "DEW_POINT", "Dew Point", "Sensors", IP_RO, 60, IPS_IDLE);
+
+    // Auto dew switches
+    AutoDew14SP[0].fill("AUTO_DEW14_ON", "On", ISS_OFF);
+    AutoDew14SP[1].fill("AUTO_DEW14_OFF", "Off", ISS_ON);
+    AutoDew14SP.fill(getDeviceName(), "AUTO_DEW14", "Auto Dew CH14", "Dew Control", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    AutoDew15SP[0].fill("AUTO_DEW15_ON", "On", ISS_OFF);
+    AutoDew15SP[1].fill("AUTO_DEW15_OFF", "Off", ISS_ON);
+    AutoDew15SP.fill(getDeviceName(), "AUTO_DEW15", "Auto Dew CH15", "Dew Control", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    // Dew margin controls
+    DewMargin14NP[0].fill("DEW_MARGIN14", "Margin (C)", "%.1f", 0, 20, 0.5, 5.0);
+    DewMargin14NP.fill(getDeviceName(), "DEW_MARGIN14", "CH14 Margin", "Dew Control", IP_RW, 60, IPS_IDLE);
+
+    DewMargin15NP[0].fill("DEW_MARGIN15", "Margin (C)", "%.1f", 0, 20, 0.5, 5.0);
+    DewMargin15NP.fill(getDeviceName(), "DEW_MARGIN15", "CH15 Margin", "Dew Control", IP_RW, 60, IPS_IDLE);
+
+    // Session statistics
+    StatsVoltageNP[0].fill("STATS_V_MIN", "Min (V)", "%.2f", 0, 20, 0.01, 0);
+    StatsVoltageNP[1].fill("STATS_V_MAX", "Max (V)", "%.2f", 0, 20, 0.01, 0);
+    StatsVoltageNP[2].fill("STATS_V_AVG", "Avg (V)", "%.2f", 0, 20, 0.01, 0);
+    StatsVoltageNP.fill(getDeviceName(), "STATS_VOLTAGE", "Voltage Stats", "Statistics", IP_RO, 60, IPS_IDLE);
+
+    StatsPowerNP[0].fill("STATS_P_MAX", "Peak (W)", "%.2f", 0, 500, 0.01, 0);
+    StatsPowerNP[1].fill("STATS_P_TOTAL", "Total (Wh)", "%.2f", 0, 10000, 0.01, 0);
+    StatsPowerNP.fill(getDeviceName(), "STATS_POWER", "Power Stats", "Statistics", IP_RO, 60, IPS_IDLE);
+
+    StatsTempNP[0].fill("STATS_T_MIN", "Min (C)", "%.1f", -40, 85, 0.1, 0);
+    StatsTempNP[1].fill("STATS_T_MAX", "Max (C)", "%.1f", -40, 85, 0.1, 0);
+    StatsTempNP.fill(getDeviceName(), "STATS_TEMP", "Temp Stats", "Statistics", IP_RO, 60, IPS_IDLE);
+
+    UptimeNP[0].fill("UPTIME", "Uptime (s)", "%.0f", 0, 1000000, 1, 0);
+    UptimeNP.fill(getDeviceName(), "UPTIME", "Uptime", "Statistics", IP_RO, 60, IPS_IDLE);
+
+    // Alert status lights
+    AlertsLP[0].fill("ALERT_LOW_V", "Low Voltage", IPS_IDLE);
+    AlertsLP[1].fill("ALERT_CRIT_V", "Critical Voltage", IPS_IDLE);
+    AlertsLP[2].fill("ALERT_THERMAL", "Thermal", IPS_IDLE);
+    AlertsLP[3].fill("ALERT_I2C", "I2C Fail", IPS_IDLE);
+    AlertsLP.fill(getDeviceName(), "ALERTS", "Alerts", "Diagnostics", IPS_IDLE);
+
+    // Diagnostics
+    DiagnosticsNP[0].fill("FREE_HEAP", "Free Heap (bytes)", "%.0f", 0, 500000, 1, 0);
+    DiagnosticsNP.fill(getDeviceName(), "DIAGNOSTICS", "Diagnostics", "Diagnostics", IP_RO, 60, IPS_IDLE);
+
+    // Sensor status lights
+    SensorStatusLP[0].fill("I2C_OK", "I2C Bus", IPS_IDLE);
+    SensorStatusLP[1].fill("INA219_OK", "INA219", IPS_IDLE);
+    SensorStatusLP[2].fill("SHT4X_OK", "SHT4x", IPS_IDLE);
+    SensorStatusLP.fill(getDeviceName(), "SENSOR_STATUS", "Sensor Status", "Diagnostics", IPS_IDLE);
+
+    // Firmware info
+    FirmwareTP[0].fill("FW_VERSION", "Version", "");
+    FirmwareTP[1].fill("FW_CAPS", "Capabilities", "");
+    FirmwareTP.fill(getDeviceName(), "FIRMWARE", "Firmware", OPTIONS_TAB, IP_RO, 60, IPS_IDLE);
+
+    // Calibration offsets
+    CalibrationNP[0].fill("CAL_V_OFFSET", "Voltage (V)", "%.2f", -2.0, 2.0, 0.01, 0);
+    CalibrationNP[1].fill("CAL_T_OFFSET", "Temperature (C)", "%.1f", -10.0, 10.0, 0.1, 0);
+    CalibrationNP[2].fill("CAL_H_OFFSET", "Humidity (%)", "%.1f", -20.0, 20.0, 0.5, 0);
+    CalibrationNP.fill(getDeviceName(), "CALIBRATION", "Calibration", "Calibration", IP_RW, 60, IPS_IDLE);
+
+    // Alert configuration
+    AlertConfigNP[0].fill("ALERT_LOW_V_THRESH", "Low V Threshold", "%.1f", 10.0, 14.0, 0.1, 11.5);
+    AlertConfigNP[1].fill("ALERT_CRIT_V_THRESH", "Critical V Threshold", "%.1f", 9.0, 12.0, 0.1, 11.0);
+    AlertConfigNP[2].fill("ALERT_CRIT_V_THRESH2", "Reserved", "%.1f", 0, 0, 0, 0);  // placeholder for future
+    AlertConfigNP.fill(getDeviceName(), "ALERT_CONFIG", "Alert Thresholds", "Alerts", IP_RW, 60, IPS_IDLE);
+
+    AlertLowVSP[0].fill("ALERT_LOW_V_ON", "Enabled", ISS_ON);
+    AlertLowVSP[1].fill("ALERT_LOW_V_OFF", "Disabled", ISS_OFF);
+    AlertLowVSP.fill(getDeviceName(), "ALERT_LOW_V_EN", "Low Voltage Alert", "Alerts", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    AlertCritVSP[0].fill("ALERT_CRIT_V_ON", "Enabled", ISS_ON);
+    AlertCritVSP[1].fill("ALERT_CRIT_V_OFF", "Disabled", ISS_OFF);
+    AlertCritVSP.fill(getDeviceName(), "ALERT_CRIT_V_EN", "Critical Voltage Alert", "Alerts", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    AlertAutoOffSP[0].fill("ALERT_AUTO_OFF_ON", "Enabled", ISS_ON);
+    AlertAutoOffSP[1].fill("ALERT_AUTO_OFF_OFF", "Disabled", ISS_OFF);
+    AlertAutoOffSP.fill(getDeviceName(), "ALERT_AUTO_OFF", "Auto-Off on Critical", "Alerts", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    // I2C Recovery button
+    I2CRecoverySP[0].fill("I2C_RECOVER", "Recover", ISS_OFF);
+    I2CRecoverySP.fill(getDeviceName(), "I2C_RECOVERY", "I2C Recovery", "Diagnostics", IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    // Stats reset button
+    StatsResetSP[0].fill("STATS_RESET", "Reset", ISS_OFF);
+    StatsResetSP.fill(getDeviceName(), "STATS_RESET", "Reset Statistics", "Statistics", IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    // Port names (custom labels)
+    PortNamesTP[0].fill("PORT_DC1", "DC1", "DC1");
+    PortNamesTP[1].fill("PORT_DC2", "DC2", "DC2");
+    PortNamesTP[2].fill("PORT_DC3", "DC3", "DC3");
+    PortNamesTP[3].fill("PORT_DC4", "DC4", "DC4");
+    PortNamesTP[4].fill("PORT_DC5", "DC5", "DC5");
+    PortNamesTP[5].fill("PORT_USB12", "USB12", "USB12");
+    PortNamesTP[6].fill("PORT_USB345", "USB345", "USB345");
+    PortNamesTP[7].fill("PORT_PWM13", "PWM13", "PWM13");
+    PortNamesTP[8].fill("PORT_PWM14", "PWM14", "PWM14");
+    PortNamesTP[9].fill("PORT_PWM15", "PWM15", "PWM15");
+    PortNamesTP.fill(getDeviceName(), "PORT_NAMES", "Port Names", "Port Labels", IP_RW, 60, IPS_IDLE);
+
     // Set driver info
     addAuxControls();
 
@@ -128,6 +302,7 @@ bool SV241::updateProperties()
 
     if (isConnected())
     {
+        // Basic properties (always shown)
         defineProperty(DC1SP);
         defineProperty(DC2SP);
         defineProperty(DC3SP);
@@ -149,11 +324,69 @@ bool SV241::updateProperties()
         syncAllStates();
         readAllSensors();
 
+        // Detect extended firmware and show additional properties if available
+        if (detectExtendedFirmware())
+        {
+            LOG_INFO("Extended firmware detected - enabling advanced features");
+
+            // Show firmware info
+            defineProperty(FirmwareTP);
+
+            // Dew control properties
+            defineProperty(DewPointNP);
+            defineProperty(AutoDew14SP);
+            defineProperty(AutoDew15SP);
+            defineProperty(DewMargin14NP);
+            defineProperty(DewMargin15NP);
+
+            // Statistics properties
+            defineProperty(StatsVoltageNP);
+            defineProperty(StatsPowerNP);
+            defineProperty(StatsTempNP);
+            defineProperty(UptimeNP);
+
+            // Diagnostics properties
+            defineProperty(AlertsLP);
+            defineProperty(DiagnosticsNP);
+            defineProperty(SensorStatusLP);
+            defineProperty(I2CRecoverySP);
+
+            // Calibration properties
+            defineProperty(CalibrationNP);
+
+            // Alert config properties
+            defineProperty(AlertConfigNP);
+            defineProperty(AlertLowVSP);
+            defineProperty(AlertCritVSP);
+            defineProperty(AlertAutoOffSP);
+
+            // Stats reset button
+            defineProperty(StatsResetSP);
+
+            // Port names
+            defineProperty(PortNamesTP);
+
+            // Get initial extended status
+            extGetStatus();
+            extGetDewStatus();
+            extGetStats();
+            extGetAlerts();
+            extGetDiagnostics();
+            extGetCalibration();
+            extGetAlertConfig();
+            extGetNames();
+        }
+        else
+        {
+            LOG_INFO("Standard firmware detected - basic features only");
+        }
+
         // Start polling timer
         SetTimer(POLL_INTERVAL_MS);
     }
     else
     {
+        // Basic properties
         deleteProperty(DC1SP);
         deleteProperty(DC2SP);
         deleteProperty(DC3SP);
@@ -170,6 +403,34 @@ bool SV241::updateProperties()
         deleteProperty(AmbientTempNP);
         deleteProperty(LensTempNP);
         deleteProperty(HumidityNP);
+
+        // Extended properties (only if they were shown)
+        if (hasExtendedFirmware)
+        {
+            deleteProperty(FirmwareTP);
+            deleteProperty(DewPointNP);
+            deleteProperty(AutoDew14SP);
+            deleteProperty(AutoDew15SP);
+            deleteProperty(DewMargin14NP);
+            deleteProperty(DewMargin15NP);
+            deleteProperty(StatsVoltageNP);
+            deleteProperty(StatsPowerNP);
+            deleteProperty(StatsTempNP);
+            deleteProperty(UptimeNP);
+            deleteProperty(AlertsLP);
+            deleteProperty(DiagnosticsNP);
+            deleteProperty(SensorStatusLP);
+            deleteProperty(I2CRecoverySP);
+            deleteProperty(CalibrationNP);
+            deleteProperty(AlertConfigNP);
+            deleteProperty(AlertLowVSP);
+            deleteProperty(AlertCritVSP);
+            deleteProperty(AlertAutoOffSP);
+            deleteProperty(StatsResetSP);
+            deleteProperty(PortNamesTP);
+        }
+
+        hasExtendedFirmware = false;
     }
 
     return true;
@@ -612,6 +873,584 @@ bool SV241::readAllSensors()
     return success;
 }
 
+// ============================================================================
+// Extended Protocol Implementation
+// ============================================================================
+
+bool SV241::sendExtendedCommand(const std::string &jsonCmd, std::string &response)
+{
+    if (PortFD < 0)
+        return false;
+
+    // Build frame: [0x24] [LEN] [0x10] [JSON...] [CHECKSUM]
+    size_t jsonLen = jsonCmd.length();
+    size_t totalLen = 1 + 1 + 1 + jsonLen + 1;  // header + len + cmd + json + checksum
+
+    std::vector<uint8_t> frame(totalLen);
+    frame[0] = CMD_HEADER;
+    frame[1] = static_cast<uint8_t>(totalLen);
+    frame[2] = CMD_EXTENDED;
+    memcpy(&frame[3], jsonCmd.c_str(), jsonLen);
+
+    // Calculate checksum
+    int sum = 0;
+    for (size_t i = 0; i < totalLen - 1; i++)
+        sum += frame[i];
+    if (sum > 255)
+        sum = sum % 255;
+    frame[totalLen - 1] = static_cast<uint8_t>(sum);
+
+    LOGF_DEBUG("EXT TX: %s", jsonCmd.c_str());
+
+    tcflush(PortFD, TCIFLUSH);
+
+    // Write frame
+    size_t totalWritten = 0;
+    while (totalWritten < totalLen)
+    {
+        ssize_t written = write(PortFD, &frame[totalWritten], totalLen - totalWritten);
+        if (written <= 0)
+        {
+            LOG_ERROR("Extended command write error");
+            return false;
+        }
+        totalWritten += written;
+    }
+
+    usleep(200000);  // Wait 200ms for response
+
+    // Read response - first read header to get length
+    uint8_t header[3];
+    struct pollfd pfd;
+    pfd.fd = PortFD;
+    pfd.events = POLLIN;
+
+    if (poll(&pfd, 1, READ_TIMEOUT_MS) <= 0)
+    {
+        LOG_DEBUG("Extended command: no response (timeout)");
+        return false;
+    }
+
+    ssize_t bytesRead = read(PortFD, header, 3);
+    if (bytesRead < 3 || header[0] != CMD_HEADER || header[2] != CMD_EXTENDED)
+    {
+        LOG_DEBUG("Extended command: invalid response header");
+        return false;
+    }
+
+    size_t respLen = header[1];
+    if (respLen < 5 || respLen > 512)
+    {
+        LOGF_DEBUG("Extended command: invalid response length %zu", respLen);
+        return false;
+    }
+
+    // Read remaining bytes
+    std::vector<uint8_t> respBuf(respLen);
+    memcpy(&respBuf[0], header, 3);
+
+    size_t remaining = respLen - 3;
+    size_t totalRead = 3;
+    while (remaining > 0)
+    {
+        if (poll(&pfd, 1, READ_TIMEOUT_MS) <= 0)
+            break;
+        bytesRead = read(PortFD, &respBuf[totalRead], remaining);
+        if (bytesRead <= 0)
+            break;
+        totalRead += bytesRead;
+        remaining -= bytesRead;
+    }
+
+    if (totalRead != respLen)
+    {
+        LOGF_DEBUG("Extended command: incomplete response (%zu/%zu)", totalRead, respLen);
+        return false;
+    }
+
+    // Extract JSON (from byte 3 to len-1)
+    response = std::string(reinterpret_cast<char*>(&respBuf[3]), respLen - 4);
+
+    LOGF_DEBUG("EXT RX: %s", response.c_str());
+    return true;
+}
+
+bool SV241::detectExtendedFirmware()
+{
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"version\"}", response))
+    {
+        hasExtendedFirmware = false;
+        return false;
+    }
+
+    // Parse version response
+    std::string fw = getJsonString(response, "fw");
+    if (fw.empty())
+    {
+        hasExtendedFirmware = false;
+        return false;
+    }
+
+    firmwareVersion = fw;
+    firmwareCapabilities = getJsonStringArray(response, "caps");
+
+    // Update firmware info property
+    FirmwareTP[0].setText(firmwareVersion.c_str());
+
+    std::string capsStr;
+    for (size_t i = 0; i < firmwareCapabilities.size(); i++)
+    {
+        if (i > 0) capsStr += ", ";
+        capsStr += firmwareCapabilities[i];
+    }
+    FirmwareTP[1].setText(capsStr.c_str());
+    FirmwareTP.setState(IPS_OK);
+
+    hasExtendedFirmware = true;
+    LOGF_INFO("Extended firmware: %s, capabilities: %s", firmwareVersion.c_str(), capsStr.c_str());
+
+    return true;
+}
+
+bool SV241::extGetStatus()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"status\"}", response))
+        return false;
+
+    // Parse status values - these are more accurate than binary protocol
+    dewPoint = getJsonDouble(response, "dew");
+
+    DewPointNP[0].setValue(dewPoint);
+    DewPointNP.setState(IPS_OK);
+    DewPointNP.apply();
+
+    // Update uptime
+    int uptime = getJsonInt(response, "uptime");
+    UptimeNP[0].setValue(uptime);
+    UptimeNP.setState(IPS_OK);
+    UptimeNP.apply();
+
+    return true;
+}
+
+bool SV241::extGetDewStatus()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"dew_status\"}", response))
+        return false;
+
+    // Parse dew status
+    dewPoint = getJsonDouble(response, "dew_point");
+    DewPointNP[0].setValue(dewPoint);
+    DewPointNP.setState(IPS_OK);
+    DewPointNP.apply();
+
+    // Parse channel 14 status - find ch14 object
+    size_t ch14Pos = response.find("\"ch14\":");
+    if (ch14Pos != std::string::npos)
+    {
+        std::string ch14Sub = response.substr(ch14Pos);
+        autoDew14 = getJsonBool(ch14Sub, "auto");
+        dewMargin14 = getJsonDouble(ch14Sub, "margin", 5.0);
+
+        AutoDew14SP[0].setState(autoDew14 ? ISS_ON : ISS_OFF);
+        AutoDew14SP[1].setState(autoDew14 ? ISS_OFF : ISS_ON);
+        AutoDew14SP.setState(IPS_OK);
+        AutoDew14SP.apply();
+
+        DewMargin14NP[0].setValue(dewMargin14);
+        DewMargin14NP.setState(IPS_OK);
+        DewMargin14NP.apply();
+    }
+
+    // Parse channel 15 status
+    size_t ch15Pos = response.find("\"ch15\":");
+    if (ch15Pos != std::string::npos)
+    {
+        std::string ch15Sub = response.substr(ch15Pos);
+        autoDew15 = getJsonBool(ch15Sub, "auto");
+        dewMargin15 = getJsonDouble(ch15Sub, "margin", 5.0);
+
+        AutoDew15SP[0].setState(autoDew15 ? ISS_ON : ISS_OFF);
+        AutoDew15SP[1].setState(autoDew15 ? ISS_OFF : ISS_ON);
+        AutoDew15SP.setState(IPS_OK);
+        AutoDew15SP.apply();
+
+        DewMargin15NP[0].setValue(dewMargin15);
+        DewMargin15NP.setState(IPS_OK);
+        DewMargin15NP.apply();
+    }
+
+    return true;
+}
+
+bool SV241::extSetDewConfig(int channel, bool autoMode, double margin)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"dew_config\",\"ch\":" << channel
+        << ",\"auto\":" << (autoMode ? "true" : "false")
+        << ",\"margin\":" << margin << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        LOGF_INFO("Dew config updated: channel %d, auto=%s, margin=%.1f",
+                  channel, autoMode ? "on" : "off", margin);
+    }
+
+    return ok;
+}
+
+bool SV241::extGetStats()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"stats\"}", response))
+        return false;
+
+    // Parse statistics
+    StatsVoltageNP[0].setValue(getJsonDouble(response, "v_min"));
+    StatsVoltageNP[1].setValue(getJsonDouble(response, "v_max"));
+    StatsVoltageNP[2].setValue(getJsonDouble(response, "v_avg"));
+    StatsVoltageNP.setState(IPS_OK);
+    StatsVoltageNP.apply();
+
+    StatsPowerNP[0].setValue(getJsonDouble(response, "p_max"));
+    StatsPowerNP[1].setValue(getJsonDouble(response, "p_total"));
+    StatsPowerNP.setState(IPS_OK);
+    StatsPowerNP.apply();
+
+    StatsTempNP[0].setValue(getJsonDouble(response, "t_min"));
+    StatsTempNP[1].setValue(getJsonDouble(response, "t_max"));
+    StatsTempNP.setState(IPS_OK);
+    StatsTempNP.apply();
+
+    UptimeNP[0].setValue(getJsonDouble(response, "uptime"));
+    UptimeNP.setState(IPS_OK);
+    UptimeNP.apply();
+
+    return true;
+}
+
+bool SV241::extGetAlerts()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"alerts\"}", response))
+        return false;
+
+    // Parse alert flags
+    bool lowV = getJsonBool(response, "low_v");
+    bool critV = getJsonBool(response, "crit_v");
+    bool thermal = getJsonBool(response, "thermal");
+    bool i2cFail = getJsonBool(response, "i2c_fail");
+
+    AlertsLP[0].setState(lowV ? IPS_ALERT : IPS_OK);
+    AlertsLP[1].setState(critV ? IPS_ALERT : IPS_OK);
+    AlertsLP[2].setState(thermal ? IPS_ALERT : IPS_OK);
+    AlertsLP[3].setState(i2cFail ? IPS_ALERT : IPS_OK);
+
+    // Overall status
+    if (critV || thermal || i2cFail)
+        AlertsLP.setState(IPS_ALERT);
+    else if (lowV)
+        AlertsLP.setState(IPS_BUSY);
+    else
+        AlertsLP.setState(IPS_OK);
+
+    AlertsLP.apply();
+
+    return true;
+}
+
+bool SV241::extGetDiagnostics()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"diag\"}", response))
+        return false;
+
+    // Parse diagnostics
+    DiagnosticsNP[0].setValue(getJsonDouble(response, "free_heap"));
+    DiagnosticsNP.setState(IPS_OK);
+    DiagnosticsNP.apply();
+
+    // Sensor status
+    bool i2cOk = getJsonBool(response, "i2c_ok");
+    bool ina219Ok = getJsonBool(response, "ina219_ok");
+    bool sht4xOk = getJsonBool(response, "sht4x_ok");
+
+    SensorStatusLP[0].setState(i2cOk ? IPS_OK : IPS_ALERT);
+    SensorStatusLP[1].setState(ina219Ok ? IPS_OK : IPS_ALERT);
+    SensorStatusLP[2].setState(sht4xOk ? IPS_OK : IPS_ALERT);
+
+    if (i2cOk && ina219Ok && sht4xOk)
+        SensorStatusLP.setState(IPS_OK);
+    else
+        SensorStatusLP.setState(IPS_ALERT);
+
+    SensorStatusLP.apply();
+
+    return true;
+}
+
+bool SV241::parseJsonResponse(const std::string &json, std::string &error)
+{
+    error = getJsonString(json, "err");
+    return error.empty();
+}
+
+bool SV241::extGetCalibration()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"cal_get\"}", response))
+        return false;
+
+    // Parse calibration offsets
+    calVOffset = getJsonDouble(response, "v_offset");
+    calTOffset = getJsonDouble(response, "t_offset");
+    calHOffset = getJsonDouble(response, "h_offset");
+
+    CalibrationNP[0].setValue(calVOffset);
+    CalibrationNP[1].setValue(calTOffset);
+    CalibrationNP[2].setValue(calHOffset);
+    CalibrationNP.setState(IPS_OK);
+    CalibrationNP.apply();
+
+    LOGF_INFO("Calibration loaded: V=%.2f, T=%.1f, H=%.1f", calVOffset, calTOffset, calHOffset);
+    return true;
+}
+
+bool SV241::extSetCalibration(double vOffset, double tOffset, double hOffset)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"cal_set\",\"v_offset\":" << vOffset
+        << ",\"t_offset\":" << tOffset
+        << ",\"h_offset\":" << hOffset << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        calVOffset = vOffset;
+        calTOffset = tOffset;
+        calHOffset = hOffset;
+        LOGF_INFO("Calibration saved: V=%.2f, T=%.1f, H=%.1f", vOffset, tOffset, hOffset);
+    }
+
+    return ok;
+}
+
+bool SV241::extGetAlertConfig()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"alert_config\"}", response))
+        return false;
+
+    // Parse low_v config
+    size_t lowVPos = response.find("\"low_v\":");
+    if (lowVPos != std::string::npos)
+    {
+        std::string lowVSub = response.substr(lowVPos);
+        alertLowVEnabled = getJsonBool(lowVSub, "en", true);
+        alertLowVThreshold = getJsonDouble(lowVSub, "thresh", 11.5);
+    }
+
+    // Parse crit_v config
+    size_t critVPos = response.find("\"crit_v\":");
+    if (critVPos != std::string::npos)
+    {
+        std::string critVSub = response.substr(critVPos);
+        alertCritVEnabled = getJsonBool(critVSub, "en", true);
+        alertCritVThreshold = getJsonDouble(critVSub, "thresh", 11.0);
+        alertAutoOff = getJsonBool(critVSub, "auto_off", true);
+    }
+
+    // Update UI
+    AlertConfigNP[0].setValue(alertLowVThreshold);
+    AlertConfigNP[1].setValue(alertCritVThreshold);
+    AlertConfigNP.setState(IPS_OK);
+    AlertConfigNP.apply();
+
+    AlertLowVSP[0].setState(alertLowVEnabled ? ISS_ON : ISS_OFF);
+    AlertLowVSP[1].setState(alertLowVEnabled ? ISS_OFF : ISS_ON);
+    AlertLowVSP.setState(IPS_OK);
+    AlertLowVSP.apply();
+
+    AlertCritVSP[0].setState(alertCritVEnabled ? ISS_ON : ISS_OFF);
+    AlertCritVSP[1].setState(alertCritVEnabled ? ISS_OFF : ISS_ON);
+    AlertCritVSP.setState(IPS_OK);
+    AlertCritVSP.apply();
+
+    AlertAutoOffSP[0].setState(alertAutoOff ? ISS_ON : ISS_OFF);
+    AlertAutoOffSP[1].setState(alertAutoOff ? ISS_OFF : ISS_ON);
+    AlertAutoOffSP.setState(IPS_OK);
+    AlertAutoOffSP.apply();
+
+    return true;
+}
+
+bool SV241::extSetAlertConfig()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"alert_config\","
+        << "\"low_v\":{\"en\":" << (alertLowVEnabled ? "true" : "false")
+        << ",\"thresh\":" << alertLowVThreshold << "},"
+        << "\"crit_v\":{\"en\":" << (alertCritVEnabled ? "true" : "false")
+        << ",\"thresh\":" << alertCritVThreshold
+        << ",\"auto_off\":" << (alertAutoOff ? "true" : "false") << "}}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        LOG_INFO("Alert configuration saved");
+    }
+
+    return ok;
+}
+
+bool SV241::extI2CRecovery()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"i2c_recovery\"}", response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    bool sdaReleased = getJsonBool(response, "sda_released");
+
+    if (ok)
+    {
+        LOGF_INFO("I2C recovery %s, SDA line %s",
+                  ok ? "successful" : "failed",
+                  sdaReleased ? "released" : "stuck");
+    }
+    else
+    {
+        LOG_WARN("I2C recovery failed");
+    }
+
+    return ok;
+}
+
+bool SV241::extStatsReset()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"stats_reset\"}", response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        LOG_INFO("Session statistics reset");
+        extGetStats();  // Refresh stats display
+    }
+
+    return ok;
+}
+
+bool SV241::extGetNames()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"names_get\"}", response))
+        return false;
+
+    // Parse DC names array
+    std::vector<std::string> dcNames = getJsonStringArray(response, "dc");
+    for (size_t i = 0; i < dcNames.size() && i < 7; i++)
+    {
+        portNames[i] = dcNames[i];
+        PortNamesTP[i].setText(dcNames[i].c_str());
+    }
+
+    // Parse PWM names array
+    std::vector<std::string> pwmNames = getJsonStringArray(response, "pwm");
+    for (size_t i = 0; i < pwmNames.size() && i < 3; i++)
+    {
+        portNames[7 + i] = pwmNames[i];
+        PortNamesTP[7 + i].setText(pwmNames[i].c_str());
+    }
+
+    PortNamesTP.setState(IPS_OK);
+    PortNamesTP.apply();
+
+    LOG_INFO("Port names loaded from device");
+    return true;
+}
+
+bool SV241::extSetName(int idx, const std::string &name)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    if (idx < 0 || idx > 9)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"names_set\",\"idx\":" << idx << ",\"name\":\"" << name << "\"}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        portNames[idx] = name;
+        LOGF_INFO("Port %d name set to '%s'", idx, name.c_str());
+    }
+
+    return ok;
+}
+
 void SV241::TimerHit()
 {
     if (!isConnected())
@@ -619,6 +1458,14 @@ void SV241::TimerHit()
 
     // Read sensors periodically
     readAllSensors();
+
+    // If extended firmware, also update extended status
+    if (hasExtendedFirmware)
+    {
+        extGetStatus();
+        extGetDewStatus();
+        extGetAlerts();
+    }
 
     SetTimer(POLL_INTERVAL_MS);
 }
@@ -682,6 +1529,84 @@ bool SV241::ISNewNumber(const char *dev, const char *name, double values[], char
             }
             PWM15NP.apply();
             return true;
+        }
+
+        // Extended firmware: Dew margin controls
+        if (hasExtendedFirmware)
+        {
+            if (DewMargin14NP.isNameMatch(name))
+            {
+                double margin = values[0];
+                if (extSetDewConfig(14, autoDew14, margin))
+                {
+                    dewMargin14 = margin;
+                    DewMargin14NP[0].setValue(margin);
+                    DewMargin14NP.setState(IPS_OK);
+                }
+                else
+                {
+                    DewMargin14NP.setState(IPS_ALERT);
+                }
+                DewMargin14NP.apply();
+                return true;
+            }
+
+            if (DewMargin15NP.isNameMatch(name))
+            {
+                double margin = values[0];
+                if (extSetDewConfig(15, autoDew15, margin))
+                {
+                    dewMargin15 = margin;
+                    DewMargin15NP[0].setValue(margin);
+                    DewMargin15NP.setState(IPS_OK);
+                }
+                else
+                {
+                    DewMargin15NP.setState(IPS_ALERT);
+                }
+                DewMargin15NP.apply();
+                return true;
+            }
+
+            // Calibration offsets
+            if (CalibrationNP.isNameMatch(name))
+            {
+                double vOffset = values[0];
+                double tOffset = values[1];
+                double hOffset = values[2];
+                if (extSetCalibration(vOffset, tOffset, hOffset))
+                {
+                    CalibrationNP[0].setValue(vOffset);
+                    CalibrationNP[1].setValue(tOffset);
+                    CalibrationNP[2].setValue(hOffset);
+                    CalibrationNP.setState(IPS_OK);
+                }
+                else
+                {
+                    CalibrationNP.setState(IPS_ALERT);
+                }
+                CalibrationNP.apply();
+                return true;
+            }
+
+            // Alert thresholds
+            if (AlertConfigNP.isNameMatch(name))
+            {
+                alertLowVThreshold = values[0];
+                alertCritVThreshold = values[1];
+                if (extSetAlertConfig())
+                {
+                    AlertConfigNP[0].setValue(alertLowVThreshold);
+                    AlertConfigNP[1].setValue(alertCritVThreshold);
+                    AlertConfigNP.setState(IPS_OK);
+                }
+                else
+                {
+                    AlertConfigNP.setState(IPS_ALERT);
+                }
+                AlertConfigNP.apply();
+                return true;
+            }
         }
     }
 
@@ -810,6 +1735,132 @@ bool SV241::ISNewSwitch(const char *dev, const char *name, ISState *states, char
             USB345SP.apply();
             return true;
         }
+
+        // Extended firmware: Auto dew switches
+        if (hasExtendedFirmware)
+        {
+            if (AutoDew14SP.isNameMatch(name))
+            {
+                AutoDew14SP.update(states, names, n);
+                bool enabled = (AutoDew14SP[0].getState() == ISS_ON);
+                if (extSetDewConfig(14, enabled, dewMargin14))
+                {
+                    autoDew14 = enabled;
+                    AutoDew14SP.setState(IPS_OK);
+                }
+                else
+                {
+                    AutoDew14SP.setState(IPS_ALERT);
+                }
+                AutoDew14SP.apply();
+                return true;
+            }
+
+            if (AutoDew15SP.isNameMatch(name))
+            {
+                AutoDew15SP.update(states, names, n);
+                bool enabled = (AutoDew15SP[0].getState() == ISS_ON);
+                if (extSetDewConfig(15, enabled, dewMargin15))
+                {
+                    autoDew15 = enabled;
+                    AutoDew15SP.setState(IPS_OK);
+                }
+                else
+                {
+                    AutoDew15SP.setState(IPS_ALERT);
+                }
+                AutoDew15SP.apply();
+                return true;
+            }
+
+            // Alert enable switches
+            if (AlertLowVSP.isNameMatch(name))
+            {
+                AlertLowVSP.update(states, names, n);
+                alertLowVEnabled = (AlertLowVSP[0].getState() == ISS_ON);
+                if (extSetAlertConfig())
+                {
+                    AlertLowVSP.setState(IPS_OK);
+                }
+                else
+                {
+                    AlertLowVSP.setState(IPS_ALERT);
+                }
+                AlertLowVSP.apply();
+                return true;
+            }
+
+            if (AlertCritVSP.isNameMatch(name))
+            {
+                AlertCritVSP.update(states, names, n);
+                alertCritVEnabled = (AlertCritVSP[0].getState() == ISS_ON);
+                if (extSetAlertConfig())
+                {
+                    AlertCritVSP.setState(IPS_OK);
+                }
+                else
+                {
+                    AlertCritVSP.setState(IPS_ALERT);
+                }
+                AlertCritVSP.apply();
+                return true;
+            }
+
+            if (AlertAutoOffSP.isNameMatch(name))
+            {
+                AlertAutoOffSP.update(states, names, n);
+                alertAutoOff = (AlertAutoOffSP[0].getState() == ISS_ON);
+                if (extSetAlertConfig())
+                {
+                    AlertAutoOffSP.setState(IPS_OK);
+                }
+                else
+                {
+                    AlertAutoOffSP.setState(IPS_ALERT);
+                }
+                AlertAutoOffSP.apply();
+                return true;
+            }
+
+            // I2C Recovery button
+            if (I2CRecoverySP.isNameMatch(name))
+            {
+                I2CRecoverySP.setState(IPS_BUSY);
+                I2CRecoverySP.apply();
+
+                if (extI2CRecovery())
+                {
+                    I2CRecoverySP.setState(IPS_OK);
+                    extGetDiagnostics();  // Refresh sensor status
+                }
+                else
+                {
+                    I2CRecoverySP.setState(IPS_ALERT);
+                }
+                I2CRecoverySP[0].setState(ISS_OFF);  // Reset button state
+                I2CRecoverySP.apply();
+                return true;
+            }
+
+            // Stats reset button
+            if (StatsResetSP.isNameMatch(name))
+            {
+                StatsResetSP.setState(IPS_BUSY);
+                StatsResetSP.apply();
+
+                if (extStatsReset())
+                {
+                    StatsResetSP.setState(IPS_OK);
+                }
+                else
+                {
+                    StatsResetSP.setState(IPS_ALERT);
+                }
+                StatsResetSP[0].setState(ISS_OFF);  // Reset button state
+                StatsResetSP.apply();
+                return true;
+            }
+        }
     }
 
     return INDI::DefaultDevice::ISNewSwitch(dev, name, states, names, n);
@@ -825,6 +1876,36 @@ bool SV241::ISNewText(const char *dev, const char *name, char *texts[], char *na
             PortTP.update(texts, names, n);
             PortTP.setState(IPS_OK);
             PortTP.apply();
+            return true;
+        }
+
+        // Extended firmware: Port names
+        if (hasExtendedFirmware && PortNamesTP.isNameMatch(name))
+        {
+            // Find which name(s) changed and update
+            bool allOk = true;
+            for (int i = 0; i < n; i++)
+            {
+                // Find which index this name corresponds to
+                for (int idx = 0; idx < 10; idx++)
+                {
+                    if (strcmp(names[i], PortNamesTP[idx].getName()) == 0)
+                    {
+                        if (!extSetName(idx, texts[i]))
+                        {
+                            allOk = false;
+                        }
+                        else
+                        {
+                            PortNamesTP[idx].setText(texts[i]);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            PortNamesTP.setState(allOk ? IPS_OK : IPS_ALERT);
+            PortNamesTP.apply();
             return true;
         }
     }
