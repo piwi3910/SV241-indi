@@ -1,4 +1,4 @@
-# SV241 Extended Protocol Specification v2.2
+# SV241 Extended Protocol Specification v2.3
 
 This document defines the extended JSON-based protocol for the SV241 custom firmware. The extended protocol provides advanced features while maintaining full backward compatibility with the original binary protocol.
 
@@ -49,7 +49,7 @@ Identify firmware version and capabilities.
 
 ```json
 Request:  {"cmd":"version"}
-Response: {"fw":"SV241-EXT","ver":"2.2.0","caps":["dew","stats","alerts","cal","sched","profiles","watchdog","current"]}
+Response: {"fw":"SV241-EXT","ver":"2.3.0","caps":["dew","stats","alerts","cal","profiles","timers","temp_rate","watchdog","current_alert","boot_profile","persistent_stats"]}
 ```
 
 Capability flags:
@@ -57,10 +57,13 @@ Capability flags:
 - `stats` - Session statistics tracking
 - `alerts` - Voltage and thermal alerts
 - `cal` - Sensor calibration offsets
-- `sched` - Timer/scheduling features
 - `profiles` - Configuration profiles
+- `timers` - Timer/scheduling features
+- `temp_rate` - Temperature rate of change tracking
 - `watchdog` - Communication watchdog safety mode
-- `current` - Total current threshold alerts
+- `current_alert` - Total current threshold alerts
+- `boot_profile` - Auto-load profile on boot (NEW in v2.3)
+- `persistent_stats` - Statistics that survive reboot (NEW in v2.3)
 
 #### status
 Get complete system status in one call (reduces polling overhead).
@@ -162,17 +165,21 @@ Response: {
   "p_total": 12.5,
   "t_min": 15.2,
   "t_max": 22.1,
-  "i2c_recoveries": 2
+  "i2c_recoveries": 2,
+  "p_total_all": 156.8,
+  "total_uptime": 36000
 }
 ```
 
 Fields:
-- `uptime` - Seconds since boot
+- `uptime` - Seconds since boot (current session)
 - `v_min`, `v_max`, `v_avg` - Voltage statistics (V)
 - `p_max` - Peak power (W)
-- `p_total` - Total energy consumed (Wh)
+- `p_total` - Total energy consumed this session (Wh)
 - `t_min`, `t_max` - Temperature range (°C)
 - `i2c_recoveries` - Number of I2C bus recoveries
+- `p_total_all` - Total energy consumed across all sessions (Wh) (NEW in v2.3)
+- `total_uptime` - Total uptime across all sessions (seconds) (NEW in v2.3)
 
 #### stats_reset
 Reset session statistics.
@@ -480,6 +487,78 @@ Note: The alert is automatically cleared when current drops below the threshold.
 
 ---
 
+### 12. Boot Profile (NEW in v2.3)
+
+Configure a profile to automatically load when the device powers on. This allows the device to restore your preferred configuration without needing to connect to the INDI driver.
+
+#### boot_config
+Get or set boot profile configuration.
+
+**Get configuration:**
+```json
+Request:  {"cmd":"boot_config"}
+Response: {"profile":-1}
+```
+
+```json
+Request:  {"cmd":"boot_config"}
+Response: {"profile":0,"name":"Imaging"}
+```
+
+Fields:
+- `profile` - Profile slot to load on boot (-1 = disabled, 0-3 = profile slot)
+- `name` - Name of the configured profile (only present if a profile is set)
+
+**Set configuration:**
+```json
+Request:  {"cmd":"boot_config","profile":0}
+Response: {"ok":true}
+```
+
+**Disable boot profile:**
+```json
+Request:  {"cmd":"boot_config","profile":-1}
+Response: {"ok":true}
+```
+
+Notes:
+- The profile must exist before it can be set as the boot profile
+- If the boot profile is later deleted, the device will skip loading it on boot
+- Configuration is stored in EEPROM and persists across power cycles
+
+---
+
+### 13. Persistent Stats (NEW in v2.3)
+
+Save session statistics to EEPROM so they survive device reboots. Useful for tracking total energy consumption over multiple sessions.
+
+#### stats_save
+Manually save current statistics to EEPROM.
+
+**Save stats:**
+```json
+Request:  {"cmd":"stats_save"}
+Response: {"ok":true,"p_total_all":156.8,"total_uptime":36000}
+```
+
+Fields:
+- `p_total_all` - Total energy consumed across all sessions (Wh)
+- `total_uptime` - Total uptime across all sessions (seconds)
+
+**Reset persistent stats:**
+```json
+Request:  {"cmd":"stats_save","reset":true}
+Response: {"ok":true,"reset":true}
+```
+
+Notes:
+- Stats are automatically saved to EEPROM every 30 minutes (hybrid approach to minimize EEPROM wear)
+- Use `stats_save` when disconnecting or before powering off to ensure latest stats are saved
+- The `stats` command now includes `p_total_all` and `total_uptime` fields for cumulative statistics
+- Use `reset:true` to clear all persistent stats and start fresh
+
+---
+
 ## Error Responses
 
 All commands can return error responses:
@@ -515,6 +594,10 @@ All commands can return error responses:
 ### Phase 4 (Safety)
 - `watchdog` - Communication watchdog with configurable actions
 - `current_alert` - Total current threshold monitoring
+
+### Phase 5 (Persistence)
+- `boot_config` - Auto-load profile on boot
+- `stats_save` - Persistent statistics across reboots
 
 ---
 

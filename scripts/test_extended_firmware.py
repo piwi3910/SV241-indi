@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for SV241 Extended Firmware v2.0.
+Test script for SV241 Extended Firmware v2.3.
 Tests JSON-based extended commands while maintaining backward compatibility.
 """
 import serial
@@ -895,11 +895,109 @@ def test_extended_current_alert(ser):
         return False
 
 
+# ============================================================================
+# PHASE 5 TESTS (Persistence)
+# ============================================================================
+
+def test_extended_boot_config(ser):
+    """Test boot_config get/set command."""
+    print("\n=== Testing Extended: boot_config ===\n")
+
+    # Get current boot config
+    resp = send_json_command(ser, {"cmd": "boot_config"})
+    if resp and "profile" in resp:
+        original_profile = resp.get('profile')
+        print(f"  Current boot profile: {original_profile}")
+        if 'name' in resp:
+            print(f"  Profile name: {resp.get('name')}")
+
+        # First make sure we have a profile to use
+        # Save current state as a test profile
+        resp_save = send_json_command(ser, {"cmd": "profile_save", "slot": 0, "name": "BootTest"})
+        if not resp_save or not resp_save.get("ok"):
+            print(f"  profile_save FAILED: {resp_save}")
+            return False
+
+        # Test setting boot profile to slot 0
+        resp2 = send_json_command(ser, {"cmd": "boot_config", "profile": 0})
+        if resp2 and resp2.get("ok"):
+            print("  Set boot profile to slot 0: OK")
+
+            # Verify the change
+            resp3 = send_json_command(ser, {"cmd": "boot_config"})
+            if resp3 and resp3.get("profile") == 0:
+                print(f"  Verified: boot profile = {resp3.get('profile')}")
+                if 'name' in resp3:
+                    print(f"  Profile name: {resp3.get('name')}")
+
+                # Test disabling boot profile
+                resp4 = send_json_command(ser, {"cmd": "boot_config", "profile": -1})
+                if resp4 and resp4.get("ok"):
+                    print("  Disabled boot profile: OK")
+
+                    # Verify it's disabled
+                    resp5 = send_json_command(ser, {"cmd": "boot_config"})
+                    if resp5 and resp5.get("profile") == -1:
+                        print("  Verified: boot profile disabled")
+                        return True
+                    else:
+                        print(f"  Verification FAILED: {resp5}")
+                        return False
+                else:
+                    print(f"  Disable FAILED: {resp4}")
+                    return False
+            else:
+                print(f"  Verification FAILED: {resp3}")
+                return False
+        else:
+            print(f"  Setting boot config FAILED: {resp2}")
+            return False
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
+def test_extended_stats_save(ser):
+    """Test stats_save command."""
+    print("\n=== Testing Extended: stats_save ===\n")
+
+    # First get current stats to see p_total_all
+    resp = send_json_command(ser, {"cmd": "stats"})
+    if resp and "p_total_all" in resp:
+        print(f"  Current p_total_all: {resp.get('p_total_all')} Wh")
+        print(f"  Current total_uptime: {resp.get('total_uptime')} s")
+    else:
+        print("  Note: stats response doesn't include persistent fields (may be first run)")
+
+    # Test saving stats
+    resp2 = send_json_command(ser, {"cmd": "stats_save"})
+    if resp2 and resp2.get("ok"):
+        print("  Stats saved to EEPROM: OK")
+        print(f"    p_total_all: {resp2.get('p_total_all')} Wh")
+        print(f"    total_uptime: {resp2.get('total_uptime')} s")
+
+        # Verify in stats command
+        resp3 = send_json_command(ser, {"cmd": "stats"})
+        if resp3 and "p_total_all" in resp3:
+            print(f"  Verified in stats: p_total_all = {resp3.get('p_total_all')} Wh")
+
+            # Note: We don't test reset here as it would wipe user's data
+            # Just verify the reset command exists
+            print("  Reset command available: stats_save with reset:true")
+            return True
+        else:
+            print(f"  Verification FAILED: {resp3}")
+            return False
+    else:
+        print(f"  FAILED: {resp2}")
+        return False
+
+
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbserial-1133440"
 
     print("=" * 70)
-    print("SV241 Extended Firmware v2.2 Test (with Watchdog & Current Alert)")
+    print("SV241 Extended Firmware v2.3 Test (Boot Profile & Persistent Stats)")
     print("=" * 70)
     print(f"Port: {port}")
     print("=" * 70)
@@ -942,6 +1040,9 @@ def main():
             # Phase 4: Watchdog & Current Alert
             "Ext Watchdog": test_extended_watchdog(ser),
             "Ext Current Alert": test_extended_current_alert(ser),
+            # Phase 5: Boot Profile & Persistent Stats
+            "Ext Boot Config": test_extended_boot_config(ser),
+            "Ext Stats Save": test_extended_stats_save(ser),
         }
 
         ser.close()

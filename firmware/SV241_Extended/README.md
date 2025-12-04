@@ -1,6 +1,6 @@
-# SV241 Extended Firmware v2.2
+# SV241 Extended Firmware v2.3
 
-Advanced firmware for the SVBONY SV241 Power Box with auto dew control, session statistics, voltage alerts, sensor calibration, custom port naming, configuration profiles, timer scheduling, temperature rate tracking, PID tuning, watchdog safety mode, and current threshold alerts.
+Advanced firmware for the SVBONY SV241 Power Box with auto dew control, session statistics, voltage alerts, sensor calibration, custom port naming, configuration profiles, timer scheduling, temperature rate tracking, PID tuning, watchdog safety mode, current threshold alerts, boot profile auto-load, and persistent statistics.
 
 ## Overview
 
@@ -273,6 +273,67 @@ Alert triggers immediately, visible in INDI driver
 - Useful for detecting equipment issues early
 - Configuration is stored in EEPROM
 
+### 13. Boot Profile (NEW in v2.3)
+
+Automatically load a configuration profile when the device powers on.
+
+**How it works:**
+1. Configure which profile to load on boot (-1 = disabled, 0-3 = profile slot)
+2. On power-on, firmware applies the selected profile before any USB connection
+3. Device immediately starts with your preferred configuration
+
+**Typical Usage:**
+```
+Save your imaging setup as profile 0 "Imaging"
+Set boot profile to slot 0
+Now every time you power on, your imaging setup is ready
+```
+
+**Benefits:**
+- Start with dew heaters pre-warmed
+- Mount power ready immediately
+- No need to wait for computer connection
+- Perfect for remote/unattended setups
+
+**INDI Controls:**
+- Select boot profile slot (-1 to disable)
+- View current boot profile setting
+- Profile name displayed when set
+
+### 14. Persistent Statistics (NEW in v2.3)
+
+Track total energy consumption and uptime across multiple sessions.
+
+**How it works:**
+1. Statistics are automatically saved to EEPROM every 30 minutes
+2. On reboot, previous session totals are loaded
+3. Manual save available for immediate persistence
+
+**Tracked Data:**
+- `p_total_all` - Total energy consumed across ALL sessions (Wh)
+- `total_uptime` - Total device uptime across ALL sessions (seconds)
+
+**Typical Usage:**
+```
+View stats command now shows:
+- p_total: 2.5 Wh (current session)
+- p_total_all: 156.8 Wh (all time)
+- uptime: 3600 (current session)
+- total_uptime: 360000 (all time)
+```
+
+**EEPROM Wear Considerations:**
+- Auto-save every 30 minutes = ~17,500 writes/year
+- ESP32 flash rated for ~100,000 write cycles
+- ~5+ years of operation before wear concerns
+- Manual save on disconnect for complete accuracy
+
+**INDI Controls:**
+- View all-time energy consumption
+- View all-time uptime
+- Manual stats save command
+- Reset persistent stats to zero
+
 ## Quick Start
 
 ### Flash the Firmware
@@ -326,8 +387,10 @@ TEST SUMMARY
   Ext Temp Rate: PASS
   Ext Watchdog: PASS
   Ext Current Alert: PASS
+  Ext Boot Config: PASS
+  Ext Stats Save: PASS
 
-Total: 26/26 passed
+Total: 28/28 passed
 ```
 
 ## Protocol Reference
@@ -353,7 +416,7 @@ All extended commands use command ID `0x10`:
 **version** - Get firmware version and capabilities
 ```json
 Request:  {"cmd":"version"}
-Response: {"fw":"SV241-EXT","ver":"2.2.0","caps":["dew","stats","alerts","cal","sched","profiles","watchdog","current"]}
+Response: {"fw":"SV241-EXT","ver":"2.3.0","caps":["dew","stats","alerts","cal","profiles","timers","temp_rate","watchdog","current_alert","boot_profile","persistent_stats"]}
 ```
 
 **status** - Get complete system status
@@ -407,7 +470,9 @@ Response: {
   "p_total": 12.5,
   "t_min": 15.2,
   "t_max": 22.1,
-  "i2c_recoveries": 2
+  "i2c_recoveries": 2,
+  "p_total_all": 156.8,
+  "total_uptime": 36000
 }
 ```
 
@@ -626,6 +691,38 @@ Request:  {"cmd":"current_alert","clear":true}
 Response: {"ok":true}
 ```
 
+#### Boot Profile (NEW in v2.3)
+
+**boot_config** - Get or set boot profile configuration
+```json
+Request:  {"cmd":"boot_config"}
+Response: {"profile":-1}
+```
+
+```json
+Request:  {"cmd":"boot_config"}
+Response: {"profile":0,"name":"Imaging"}
+```
+
+```json
+Request:  {"cmd":"boot_config","profile":0}
+Response: {"ok":true}
+```
+
+#### Persistent Stats (NEW in v2.3)
+
+**stats_save** - Save stats to EEPROM and get totals
+```json
+Request:  {"cmd":"stats_save"}
+Response: {"ok":true,"p_total_all":156.8,"total_uptime":36000}
+```
+
+**reset** - Reset all persistent stats to zero
+```json
+Request:  {"cmd":"stats_save","reset":true}
+Response: {"ok":true,"reset":true}
+```
+
 ## EEPROM Storage
 
 Configuration is stored in EEPROM and persists across power cycles:
@@ -633,14 +730,15 @@ Configuration is stored in EEPROM and persists across power cycles:
 | Address | Data |
 |---------|------|
 | 0x00 | Magic number (0x5641) |
-| 0x02 | Calibration offsets (v, t, h) |
-| 0x20 | Dew configuration (2 channels) |
-| 0x60 | Alert configuration |
-| 0x80 | Port names (10 x 16 bytes) |
-| 0x118 | Profiles (4 x ~64 bytes) |
-| 0x218 | PID coefficients (2 channels x 3 floats) |
-| 0x1D8 | Watchdog configuration |
-| 0x1E0 | Current alert configuration |
+| 0x04 | Calibration offsets (12 bytes) |
+| 0x14 | Dew configuration (64 bytes) |
+| 0x5A | Alert configuration (16 bytes) |
+| 0x6E | Port names (160 bytes) |
+| 0x118 | Profiles (4 x 64 = 256 bytes) |
+| 0x1D8 | Watchdog configuration (8 bytes) |
+| 0x1E0 | Current alert configuration (8 bytes) |
+| 0x1E8 | Boot configuration (4 bytes) |
+| 0x1EC | Persistent stats (16 bytes) |
 
 ## Building from Source
 
@@ -778,7 +876,13 @@ Where:
 
 ## Version History
 
-### v2.2.0 (Current)
+### v2.3.0 (Current)
+- Boot profile - auto-load a configuration profile when device powers on
+- Persistent statistics - track total energy consumption and uptime across sessions
+- Stats auto-save every 30 minutes with manual save option
+- All v2.2.0 features included
+
+### v2.2.0
 - Watchdog / safety mode - protect equipment if control computer crashes
 - Current threshold alert - monitor total current draw for overloads
 - All v2.1.0 features included

@@ -36,7 +36,7 @@
 // ============================================================================
 
 #define FIRMWARE_NAME    "SV241-EXT"
-#define FIRMWARE_VERSION "2.2.0"
+#define FIRMWARE_VERSION "2.3.0"
 
 // ============================================================================
 // PIN DEFINITIONS
@@ -100,6 +100,8 @@
 #define EEPROM_ADDR_PROFILES  280  // Profiles (4x64 = 256 bytes, ends at 472)
 #define EEPROM_ADDR_WATCHDOG  472  // Watchdog config (8 bytes)
 #define EEPROM_ADDR_CURRENT   480  // Current alert config (8 bytes)
+#define EEPROM_ADDR_BOOT      488  // Boot config (4 bytes)
+#define EEPROM_ADDR_PSTATS    492  // Persistent stats (16 bytes)
 
 // Phase 3 constants
 #define MAX_PROFILES          4
@@ -176,6 +178,17 @@ struct WatchdogConfig {
 struct CurrentAlertConfig {
     bool enabled;
     float thresholdAmps;  // Alert when current exceeds this
+};
+
+// Boot configuration (stored in EEPROM)
+struct BootConfig {
+    int8_t bootProfile;  // -1 = disabled, 0-3 = profile to load on boot
+};
+
+// Persistent stats (stored in EEPROM - subset of session stats that survive reboot)
+struct PersistentStats {
+    float p_total_prev;   // Total Wh from previous sessions
+    uint32_t total_uptime;  // Total uptime in seconds across sessions
 };
 
 // Port names (stored in EEPROM)
@@ -256,6 +269,13 @@ bool watchdogTriggered = false;     // Has watchdog fired this session?
 
 // Current alert
 CurrentAlertConfig currentAlertConfig = {false, 5.0};  // Default: disabled, 5A threshold
+
+// Boot configuration
+BootConfig bootConfig = {-1};  // Default: disabled
+
+// Persistent stats
+PersistentStats persistentStats = {0.0, 0};
+unsigned long lastStatsSave = 0;  // Last time stats were saved to EEPROM
 
 // Port names (with defaults)
 PortNames portNames = {
@@ -359,6 +379,8 @@ void handleCmdTempRate(JsonDocument& doc);
 void handleCmdDewPid(JsonDocument& doc);
 void handleCmdWatchdog(JsonDocument& doc);
 void handleCmdCurrentAlert(JsonDocument& doc);
+void handleCmdBootConfig(JsonDocument& doc);
+void handleCmdStatsSave(JsonDocument& doc);
 
 // Watchdog and safety
 void checkWatchdog();
@@ -385,8 +407,13 @@ void saveAlertConfig();
 void savePortNames();
 void saveWatchdogConfig();
 void saveCurrentAlertConfig();
+void loadBootConfig();
+void saveBootConfig();
+void loadPersistentStats();
+void savePersistentStats();
 void loadProfiles();
 void saveProfile(int slot);
+void applyBootProfile();
 
 // Phase 3 helpers
 void updateTimers();
@@ -435,6 +462,12 @@ void setup() {
 
     // Load profiles from EEPROM
     loadProfiles();
+
+    // Apply boot profile if configured
+    applyBootProfile();
+
+    // Initialize stats save timer
+    lastStatsSave = millis();
 
     if (debugMode) {
         Serial.println("Initialization complete!");
@@ -518,6 +551,12 @@ void loop() {
     if (millis() - lastTempHistory > 60000) {
         lastTempHistory = millis();
         updateTempHistory();
+    }
+
+    // Auto-save stats to EEPROM (every 30 minutes)
+    // This preserves session statistics across unexpected power loss
+    if (millis() - lastStatsSave > 1800000) {  // 30 minutes = 1,800,000 ms
+        savePersistentStats();
     }
 
     delay(5);
@@ -613,6 +652,11 @@ void loadConfig() {
         savePortNames();
         saveWatchdogConfig();
         saveCurrentAlertConfig();
+        saveBootConfig();
+        // Initialize persistent stats to zero
+        persistentStats.p_total_prev = 0.0;
+        persistentStats.total_uptime = 0;
+        EEPROM.put(EEPROM_ADDR_PSTATS, persistentStats);
         EEPROM.commit();
         return;
     }
@@ -634,6 +678,12 @@ void loadConfig() {
 
     // Load current alert config
     EEPROM.get(EEPROM_ADDR_CURRENT, currentAlertConfig);
+
+    // Load boot config
+    loadBootConfig();
+
+    // Load persistent stats
+    loadPersistentStats();
 
     if (debugMode) Serial.println("EEPROM: Config loaded");
 }
@@ -666,6 +716,82 @@ void saveWatchdogConfig() {
 void saveCurrentAlertConfig() {
     EEPROM.put(EEPROM_ADDR_CURRENT, currentAlertConfig);
     EEPROM.commit();
+}
+
+void loadBootConfig() {
+    EEPROM.get(EEPROM_ADDR_BOOT, bootConfig);
+    // Validate - boot profile must be -1 (disabled) or 0-3
+    if (bootConfig.bootProfile < -1 || bootConfig.bootProfile >= MAX_PROFILES) {
+        bootConfig.bootProfile = -1;
+    }
+}
+
+void saveBootConfig() {
+    EEPROM.put(EEPROM_ADDR_BOOT, bootConfig);
+    EEPROM.commit();
+}
+
+void loadPersistentStats() {
+    EEPROM.get(EEPROM_ADDR_PSTATS, persistentStats);
+    // Validate - check for NaN or unreasonable values
+    if (isnan(persistentStats.p_total_prev) || persistentStats.p_total_prev < 0 ||
+        persistentStats.p_total_prev > 100000.0) {  // 100kWh max sanity check
+        persistentStats.p_total_prev = 0.0;
+    }
+    if (debugMode) {
+        Serial.printf("EEPROM: Loaded persistent stats - prev Wh: %.2f, total uptime: %lu\n",
+                      persistentStats.p_total_prev, persistentStats.total_uptime);
+    }
+}
+
+void savePersistentStats() {
+    // Update total uptime
+    persistentStats.total_uptime += (millis() - lastStatsSave) / 1000;
+
+    // Update total energy from current session
+    PersistentStats toSave;
+    toSave.p_total_prev = persistentStats.p_total_prev + stats.p_total;
+    toSave.total_uptime = persistentStats.total_uptime;
+
+    EEPROM.put(EEPROM_ADDR_PSTATS, toSave);
+    EEPROM.commit();
+
+    lastStatsSave = millis();
+
+    if (debugMode) {
+        Serial.printf("EEPROM: Saved stats - total Wh: %.2f\n", toSave.p_total_prev);
+    }
+}
+
+void applyBootProfile() {
+    if (bootConfig.bootProfile >= 0 && bootConfig.bootProfile < MAX_PROFILES) {
+        if (profiles[bootConfig.bootProfile].valid) {
+            Profile& p = profiles[bootConfig.bootProfile];
+            for (int i = 0; i < 7; i++) {
+                dcStates[i] = p.dcStates[i];
+                setDCOutput(i, dcStates[i]);
+            }
+            for (int i = 0; i < 3; i++) {
+                pwmValues[i] = p.pwmValues[i];
+                setPWMOutput(i, pwmValues[i]);
+            }
+            dewConfig[0].autoMode = p.autoDew[0];
+            dewConfig[0].margin = p.dewMargin[0];
+            dewConfig[1].autoMode = p.autoDew[1];
+            dewConfig[1].margin = p.dewMargin[1];
+            activeProfile = bootConfig.bootProfile;
+
+            if (debugMode) {
+                Serial.printf("Boot: Loaded profile '%s' (slot %d)\n",
+                              p.name, bootConfig.bootProfile);
+            }
+        } else {
+            if (debugMode) {
+                Serial.printf("Boot: Profile slot %d is empty, skipping\n",
+                              bootConfig.bootProfile);
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -1115,6 +1241,10 @@ void handleExtendedCommand(uint8_t* payload, uint8_t len) {
         handleCmdWatchdog(doc);
     } else if (strcmp(cmd, "current_alert") == 0) {
         handleCmdCurrentAlert(doc);
+    } else if (strcmp(cmd, "boot_config") == 0) {
+        handleCmdBootConfig(doc);
+    } else if (strcmp(cmd, "stats_save") == 0) {
+        handleCmdStatsSave(doc);
     } else {
         sendJsonResponse("{\"err\":\"unknown_cmd\"}");
     }
@@ -1139,6 +1269,8 @@ void handleCmdVersion(JsonDocument& doc) {
     caps.add("temp_rate");
     caps.add("watchdog");
     caps.add("current_alert");
+    caps.add("boot_profile");
+    caps.add("persistent_stats");
 
     char json[256];
     serializeJson(resp, json, sizeof(json));
@@ -1256,7 +1388,11 @@ void handleCmdStats(JsonDocument& doc) {
 
     resp["i2c_recoveries"] = stats.i2cRecoveries;
 
-    char json[256];
+    // Include persistent stats (total across all sessions)
+    resp["p_total_all"] = roundf((persistentStats.p_total_prev + stats.p_total) * 100) / 100;
+    resp["total_uptime"] = persistentStats.total_uptime + uptime;
+
+    char json[320];
     serializeJson(resp, json, sizeof(json));
     sendJsonResponse(json);
 }
@@ -2296,4 +2432,78 @@ void executeWatchdogAction() {
             }
             break;
     }
+}
+
+// ============================================================================
+// BOOT CONFIG COMMAND HANDLER
+// ============================================================================
+
+void handleCmdBootConfig(JsonDocument& doc) {
+    // Check if setting or getting
+    bool setting = doc.containsKey("profile");
+
+    if (setting) {
+        int profile = doc["profile"] | -1;
+
+        // Validate profile slot
+        if (profile < -1 || profile >= MAX_PROFILES) {
+            sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"profile\"}");
+            return;
+        }
+
+        // If setting a specific profile, verify it exists
+        if (profile >= 0 && !profiles[profile].valid) {
+            sendJsonResponse("{\"err\":\"profile_empty\"}");
+            return;
+        }
+
+        bootConfig.bootProfile = profile;
+        saveBootConfig();
+        sendJsonResponse("{\"ok\":true}");
+    } else {
+        // Return current boot config
+        JsonDocument resp;
+        resp["profile"] = bootConfig.bootProfile;
+
+        // Include profile name if one is set
+        if (bootConfig.bootProfile >= 0 && bootConfig.bootProfile < MAX_PROFILES) {
+            if (profiles[bootConfig.bootProfile].valid) {
+                resp["name"] = profiles[bootConfig.bootProfile].name;
+            }
+        }
+
+        char json[128];
+        serializeJson(resp, json, sizeof(json));
+        sendJsonResponse(json);
+    }
+}
+
+// ============================================================================
+// STATS SAVE COMMAND HANDLER
+// ============================================================================
+
+void handleCmdStatsSave(JsonDocument& doc) {
+    // Check for reset flag to clear all persistent stats
+    if (doc.containsKey("reset") && doc["reset"] == true) {
+        persistentStats.p_total_prev = 0.0;
+        persistentStats.total_uptime = 0;
+        EEPROM.put(EEPROM_ADDR_PSTATS, persistentStats);
+        EEPROM.commit();
+        lastStatsSave = millis();
+        sendJsonResponse("{\"ok\":true,\"reset\":true}");
+        return;
+    }
+
+    // Save current stats to EEPROM
+    savePersistentStats();
+
+    // Return current persistent stats
+    JsonDocument resp;
+    resp["ok"] = true;
+    resp["p_total_all"] = roundf((persistentStats.p_total_prev + stats.p_total) * 100) / 100;
+    resp["total_uptime"] = persistentStats.total_uptime + ((millis() - stats.startTime) / 1000);
+
+    char json[128];
+    serializeJson(resp, json, sizeof(json));
+    sendJsonResponse(json);
 }

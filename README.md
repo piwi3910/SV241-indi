@@ -10,9 +10,9 @@ INDI driver for the SVBONY SV241 Powerbox, enabling control from Linux-based ast
 | Hardware Testing | ✅ Verified |
 | INDI Driver | ✅ Complete |
 | Basic Firmware (v1.x) | ✅ Available |
-| **Extended Firmware (v2.2)** | ✅ **NEW** |
+| **Extended Firmware (v2.3)** | ✅ **NEW** |
 
-## What's New in v2.2
+## What's New in v2.3
 
 The extended firmware adds powerful new features while maintaining full backward compatibility:
 
@@ -79,6 +79,17 @@ The extended firmware adds powerful new features while maintaining full backward
 - **Configurable threshold** - Alert when current exceeds your limit
 - **Overload detection** - Early warning for shorts or equipment issues
 
+### Boot Profile (NEW in v2.3)
+- **Auto-load on power-on** - Device restores your preferred profile automatically
+- **No computer needed** - Works even before INDI driver connects
+- **EEPROM storage** - Configuration survives power cycles
+
+### Persistent Statistics (NEW in v2.3)
+- **Total energy tracking** - See cumulative Wh across all sessions
+- **Hybrid save approach** - Auto-saves every 30 minutes + manual save option
+- **Lifetime uptime** - Track total device usage over time
+- **EEPROM-safe** - Designed to minimize flash wear (~17,500 writes/year)
+
 See [firmware/SV241_Extended/README.md](firmware/SV241_Extended/README.md) for complete details.
 
 ## What is the SV241?
@@ -112,7 +123,7 @@ The INDI driver works with the **original factory firmware**, but there are know
 
 3. **Serial Reconnection Issues** - First read after reconnecting may fail
 
-### Recommended: Extended Firmware (v2.2)
+### Recommended: Extended Firmware (v2.3)
 
 We've created an **extended firmware** that fixes these issues AND adds powerful new features:
 
@@ -129,8 +140,10 @@ We've created an **extended firmware** that fixes these issues AND adds powerful
 ✅ **Timer scheduling** - Schedule port actions for the future
 ✅ **Temperature rate tracking** - Monitor cooling trends
 ✅ **PID tuning** - Fine-tune auto dew heater response
-✅ **Watchdog safety mode** - Protect equipment if control software crashes (NEW)
-✅ **Current threshold alerts** - Detect overloads and shorts (NEW)
+✅ **Watchdog safety mode** - Protect equipment if control software crashes
+✅ **Current threshold alerts** - Detect overloads and shorts
+✅ **Boot profile** - Auto-load a profile when device powers on (NEW)
+✅ **Persistent statistics** - Track total energy consumption across sessions (NEW)
 
 **See [`firmware/SV241_Extended/README.md`](firmware/SV241_Extended/README.md) for:**
 - Complete feature documentation
@@ -186,7 +199,7 @@ sv241-indi/
 │   │   ├── SV241_Custom.ino   # Source code
 │   │   └── SV241_Custom.merged.bin
 │   │
-│   └── SV241_Extended/        # Extended firmware (v2.2) - RECOMMENDED
+│   └── SV241_Extended/        # Extended firmware (v2.3) - RECOMMENDED
 │       ├── README.md          # Complete feature documentation
 │       ├── SV241_Extended.ino # Source code
 │       └── SV241_Extended.ino.merged.bin
@@ -331,7 +344,7 @@ See [docs/SV241_PROTOCOL.md](docs/SV241_PROTOCOL.md) for complete protocol docum
 Several Python scripts are included for testing:
 
 ```bash
-# Test extended firmware v2.2 (recommended)
+# Test extended firmware v2.3 (recommended)
 python scripts/test_extended_firmware.py /dev/ttyUSB0
 
 # Test basic firmware commands
