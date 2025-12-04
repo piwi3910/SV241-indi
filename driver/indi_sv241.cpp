@@ -48,7 +48,7 @@ bool SV241::initProperties()
     INDI::DefaultDevice::initProperties();
 
     // Connection port
-    PortTP[0].fill("PORT", "Port", "/dev/ttyUSB0");
+    PortTP[0].fill("PORT", "Port", "/dev/tty.usbserial-1133440");
     PortTP.fill(getDeviceName(), "DEVICE_PORT", "Connection", CONNECTION_TAB, IP_RW, 60, IPS_IDLE);
 
     // DC Output switches
@@ -216,6 +216,7 @@ bool SV241::openSerialPort()
     options.c_cflag &= ~CSTOPB;  // 1 stop bit
     options.c_cflag &= ~CSIZE;
     options.c_cflag |= CS8;       // 8 data bits
+    options.c_cflag &= ~HUPCL;    // IMPORTANT: Disable HUPCL to prevent DTR drop on close, which resets the ESP32
     options.c_cflag |= CLOCAL;    // Ignore modem control lines
     options.c_cflag |= CREAD;     // Enable receiver
 
