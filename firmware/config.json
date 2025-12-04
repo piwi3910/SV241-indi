@@ -1,0 +1,16 @@
+{
+    "Bin_list": null,
+    "ChipType": "ESP32",
+    "last_port": 0,
+    "port_discribe_list": [
+        "USB-SERIAL CH340 (COM4)"
+    ],
+    "selected_bin": null,
+    "selected_bin2": null,
+    "selected_bin3": null,
+    "skin_mode": "Classic",
+    "status_line": "",
+    "temp_ports_list": [
+        "COM4"
+    ]
+}
