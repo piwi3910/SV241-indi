@@ -1,6 +1,6 @@
-# SV241 Extended Firmware v2.1
+# SV241 Extended Firmware v2.2
 
-Advanced firmware for the SVBONY SV241 Power Box with auto dew control, session statistics, voltage alerts, sensor calibration, custom port naming, configuration profiles, timer scheduling, temperature rate tracking, and PID tuning.
+Advanced firmware for the SVBONY SV241 Power Box with auto dew control, session statistics, voltage alerts, sensor calibration, custom port naming, configuration profiles, timer scheduling, temperature rate tracking, PID tuning, watchdog safety mode, and current threshold alerts.
 
 ## Overview
 
@@ -185,7 +185,7 @@ Monitor how fast temperature is changing.
 - Combined with dew point proximity, helps anticipate dew issues
 - Plan dew heater activation before problems occur
 
-### 10. PID Tuning (NEW in v2.1)
+### 10. PID Tuning
 
 Fine-tune the auto dew heater PID controller for your equipment.
 
@@ -204,6 +204,74 @@ Fine-tune the auto dew heater PID controller for your equipment.
 - Increase Ki to eliminate steady-state error
 - Increase Kd to reduce oscillation
 - Start with defaults; adjust only if needed
+
+### 11. Watchdog / Safety Mode (NEW in v2.2)
+
+Protect your equipment if the control computer crashes or loses connection.
+
+**How it works:**
+1. Firmware monitors USB communication
+2. If no commands received within timeout period, watchdog triggers
+3. Configurable action executes automatically
+
+**Configuration:**
+- **Timeout**: 0-65535 seconds (default: 300 = 5 minutes)
+- **Action**: Choose what happens when watchdog triggers:
+  - `none` - Just set alert flag, don't change outputs
+  - `all_off` - Turn off all DC/USB ports, set all PWM to 0
+  - `profile` - Load a specific profile (e.g., "safe shutdown" configuration)
+
+**Typical Usage:**
+```
+Set timeout to 300 seconds (5 minutes)
+Set action to "all_off"
+If computer crashes during imaging, all outputs turn off after 5 minutes
+Prevents dew heaters from running indefinitely unattended
+```
+
+**INDI Controls:**
+- Enable/disable watchdog
+- Set timeout in seconds
+- Select action type
+- Choose profile slot (for profile action)
+- View triggered status and remaining time
+
+**Important Notes:**
+- Any command received resets the watchdog timer
+- The triggered flag must be cleared manually after a watchdog fires
+- Configuration is stored in EEPROM
+
+### 12. Current Threshold Alert (NEW in v2.2)
+
+Monitor total current draw and get alerts when it exceeds a safe threshold.
+
+**How it works:**
+1. INA219 monitors total current continuously
+2. When current exceeds threshold, alert flag is set
+3. Alert auto-clears when current drops below threshold
+
+**Configuration:**
+- **Threshold**: 0.0-10.0 amps (default: 5.0A)
+- **Enable/disable**: Turn alerting on or off
+
+**Typical Usage:**
+```
+Set threshold to 5.0A (max safe draw for your battery/supply)
+If a short circuit or equipment malfunction causes excess current
+Alert triggers immediately, visible in INDI driver
+```
+
+**INDI Controls:**
+- Enable/disable current alerting
+- Set threshold in amps
+- View current draw in real-time
+- View alert status light
+
+**Important Notes:**
+- INA219 monitors total system current, not per-port
+- Alert is informational only (no automatic shutdown)
+- Useful for detecting equipment issues early
+- Configuration is stored in EEPROM
 
 ## Quick Start
 
@@ -256,8 +324,10 @@ TEST SUMMARY
   Ext Timer List: PASS
   Ext Timer Cancel: PASS
   Ext Temp Rate: PASS
+  Ext Watchdog: PASS
+  Ext Current Alert: PASS
 
-Total: 24/24 passed
+Total: 26/26 passed
 ```
 
 ## Protocol Reference
@@ -283,7 +353,7 @@ All extended commands use command ID `0x10`:
 **version** - Get firmware version and capabilities
 ```json
 Request:  {"cmd":"version"}
-Response: {"fw":"SV241-EXT","ver":"2.0.0","caps":["dew","stats","alerts","cal"]}
+Response: {"fw":"SV241-EXT","ver":"2.2.0","caps":["dew","stats","alerts","cal","sched","profiles","watchdog","current"]}
 ```
 
 **status** - Get complete system status
@@ -352,7 +422,7 @@ Response: {"ok":true}
 **alerts** - Get current alert state
 ```json
 Request:  {"cmd":"alerts"}
-Response: {"low_v":false,"crit_v":false,"thermal":false,"i2c_fail":false}
+Response: {"low_v":false,"crit_v":false,"thermal":false,"i2c_fail":false,"over_current":false,"watchdog":false}
 ```
 
 **alert_config** - Get or set alert configuration
@@ -507,6 +577,55 @@ Request:  {"cmd":"dew_pid","ch":14,"kp":2.5,"ki":0.6,"kd":0.15}
 Response: {"ok":true}
 ```
 
+#### Watchdog (NEW in v2.2)
+
+**watchdog** - Get or set watchdog configuration
+```json
+Request:  {"cmd":"watchdog"}
+Response: {"enabled":true,"timeout":300,"action":"all_off","profile":0,"triggered":false,"remaining":285}
+```
+
+```json
+Request:  {"cmd":"watchdog","enabled":true,"timeout":300,"action":"all_off"}
+Response: {"ok":true}
+```
+
+```json
+Request:  {"cmd":"watchdog","enabled":true,"timeout":600,"action":"profile","profile":2}
+Response: {"ok":true}
+```
+
+**feed** - Reset watchdog timer (also reset by any command)
+```json
+Request:  {"cmd":"watchdog","feed":true}
+Response: {"ok":true}
+```
+
+**clear** - Clear triggered state after watchdog fires
+```json
+Request:  {"cmd":"watchdog","clear":true}
+Response: {"ok":true}
+```
+
+#### Current Alert (NEW in v2.2)
+
+**current_alert** - Get or set current alert configuration
+```json
+Request:  {"cmd":"current_alert"}
+Response: {"enabled":true,"threshold":5.0,"current":2.34,"alert":false}
+```
+
+```json
+Request:  {"cmd":"current_alert","enabled":true,"threshold":5.0}
+Response: {"ok":true}
+```
+
+**clear** - Clear alert state
+```json
+Request:  {"cmd":"current_alert","clear":true}
+Response: {"ok":true}
+```
+
 ## EEPROM Storage
 
 Configuration is stored in EEPROM and persists across power cycles:
@@ -520,6 +639,8 @@ Configuration is stored in EEPROM and persists across power cycles:
 | 0x80 | Port names (10 x 16 bytes) |
 | 0x118 | Profiles (4 x ~64 bytes) |
 | 0x218 | PID coefficients (2 channels x 3 floats) |
+| 0x1D8 | Watchdog configuration |
+| 0x1E0 | Current alert configuration |
 
 ## Building from Source
 
@@ -641,9 +762,28 @@ Where:
 2. Full accuracy requires 30 samples (30 minutes of operation)
 3. Verify temperature sensor is working in diagnostics
 
+### Watchdog keeps triggering
+
+1. Increase timeout to allow for network/computer delays
+2. Ensure INDI driver is polling (default every 5 seconds)
+3. After watchdog fires, must clear triggered state to re-arm
+4. Check watchdog action is appropriate for your use case
+
+### Current alert not working
+
+1. Verify INA219 sensor is functioning (check diagnostics)
+2. Ensure threshold is set to a reasonable value
+3. Current monitoring is total system current only
+4. Alert auto-clears when current drops below threshold
+
 ## Version History
 
-### v2.1.0 (Current)
+### v2.2.0 (Current)
+- Watchdog / safety mode - protect equipment if control computer crashes
+- Current threshold alert - monitor total current draw for overloads
+- All v2.1.0 features included
+
+### v2.1.0
 - Configuration profiles (4 slots) - save/load complete device setups
 - Timer scheduling (8 concurrent) - schedule future port actions
 - Temperature rate tracking - monitor cooling/heating trends
@@ -679,3 +819,5 @@ Issues and improvements welcome! Please test thoroughly, especially:
 - Timer scheduling accuracy
 - Temperature rate calculation over extended sessions
 - PID tuning effectiveness with different heater types
+- Watchdog behavior during long sessions
+- Current alert threshold accuracy

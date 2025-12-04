@@ -809,11 +809,97 @@ def test_extended_dew_pid(ser):
         return False
 
 
+def test_extended_watchdog(ser):
+    """Test watchdog get/set command."""
+    print("\n=== Testing Extended: watchdog ===\n")
+
+    # Get current watchdog config
+    resp = send_json_command(ser, {"cmd": "watchdog"})
+    if resp and "enabled" in resp:
+        print("  Current watchdog config:")
+        print(f"    Enabled: {resp.get('enabled')}")
+        print(f"    Timeout: {resp.get('timeout')}s")
+        print(f"    Action: {resp.get('action')}")
+        print(f"    Profile slot: {resp.get('profile')}")
+        print(f"    Triggered: {resp.get('triggered')}")
+        print(f"    Remaining: {resp.get('remaining')}s")
+
+        # Test setting watchdog config (disabled with 60s timeout)
+        resp2 = send_json_command(ser, {
+            "cmd": "watchdog",
+            "enabled": False,
+            "timeout": 60,
+            "action": "all_off"
+        })
+        if resp2 and resp2.get("ok"):
+            print("  Set watchdog config: OK")
+
+            # Verify the change
+            resp3 = send_json_command(ser, {"cmd": "watchdog"})
+            if resp3 and resp3.get("timeout") == 60:
+                print(f"  Verified: timeout = {resp3.get('timeout')}s")
+                return True
+            else:
+                print(f"  Verification FAILED: {resp3}")
+                return False
+        else:
+            print(f"  Setting watchdog FAILED: {resp2}")
+            return False
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
+def test_extended_current_alert(ser):
+    """Test current_alert get/set command."""
+    print("\n=== Testing Extended: current_alert ===\n")
+
+    # Get current config
+    resp = send_json_command(ser, {"cmd": "current_alert"})
+    if resp and "enabled" in resp:
+        print("  Current alert config:")
+        print(f"    Enabled: {resp.get('enabled')}")
+        print(f"    Threshold: {resp.get('threshold')}A")
+        print(f"    Current draw: {resp.get('current')}A")
+        print(f"    Alert active: {resp.get('alert')}")
+
+        # Test setting config
+        resp2 = send_json_command(ser, {
+            "cmd": "current_alert",
+            "enabled": True,
+            "threshold": 3.5
+        })
+        if resp2 and resp2.get("ok"):
+            print("  Set current alert config: OK")
+
+            # Verify the change
+            resp3 = send_json_command(ser, {"cmd": "current_alert"})
+            if resp3 and resp3.get("threshold") == 3.5:
+                print(f"  Verified: threshold = {resp3.get('threshold')}A")
+
+                # Restore original value
+                send_json_command(ser, {
+                    "cmd": "current_alert",
+                    "enabled": resp.get('enabled'),
+                    "threshold": resp.get('threshold')
+                })
+                return True
+            else:
+                print(f"  Verification FAILED: {resp3}")
+                return False
+        else:
+            print(f"  Setting current alert FAILED: {resp2}")
+            return False
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbserial-1133440"
 
     print("=" * 70)
-    print("SV241 Extended Firmware v2.1 Test (with Phase 3)")
+    print("SV241 Extended Firmware v2.2 Test (with Watchdog & Current Alert)")
     print("=" * 70)
     print(f"Port: {port}")
     print("=" * 70)
@@ -853,6 +939,9 @@ def main():
             # Phase 3: Temperature Rate & PID
             "Ext Temp Rate": test_extended_temp_rate(ser),
             "Ext Dew PID": test_extended_dew_pid(ser),
+            # Phase 4: Watchdog & Current Alert
+            "Ext Watchdog": test_extended_watchdog(ser),
+            "Ext Current Alert": test_extended_current_alert(ser),
         }
 
         ser.close()

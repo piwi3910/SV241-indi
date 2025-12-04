@@ -109,6 +109,14 @@ private:
     bool extGetDewPid(int channel);
     bool extSetDewPid(int channel, double kp, double ki, double kd);
 
+    // Phase 4: Watchdog
+    bool extGetWatchdog();
+    bool extSetWatchdog(bool enabled, int timeout, const std::string &action, int profile);
+
+    // Phase 4: Current alert
+    bool extGetCurrentAlert();
+    bool extSetCurrentAlert(bool enabled, double threshold);
+
     // Device control functions
     bool setDCOutput(int channel, bool enabled);
     bool setPWMValue(int channel, uint8_t value);
@@ -216,6 +224,20 @@ private:
     INDI::PropertyNumber PID14NP{3};          // Kp, Ki, Kd for channel 14
     INDI::PropertyNumber PID15NP{3};          // Kp, Ki, Kd for channel 15
 
+    // Phase 4: Watchdog
+    INDI::PropertySwitch WatchdogEnableSP{2};   // Enable/disable watchdog
+    INDI::PropertyNumber WatchdogTimeoutNP{1};  // Timeout in seconds
+    INDI::PropertySwitch WatchdogActionSP{3};   // none, all_off, profile
+    INDI::PropertyNumber WatchdogProfileNP{1};  // Profile slot for action
+    INDI::PropertyLight WatchdogStatusLP{1};    // Watchdog triggered status
+    INDI::PropertyNumber WatchdogRemainingNP{1}; // Seconds remaining
+
+    // Phase 4: Current alert
+    INDI::PropertySwitch CurrentAlertEnableSP{2};  // Enable/disable
+    INDI::PropertyNumber CurrentAlertThresholdNP{1}; // Threshold in amps
+    INDI::PropertyLight CurrentAlertStatusLP{1};   // Alert status
+    INDI::PropertyNumber CurrentDrawNP{1};         // Current reading
+
     // Internal state
     double currentVoltage{0.0};
     double currentPower{0.0};
@@ -271,6 +293,20 @@ private:
     // Phase 3: PID state
     double pid14Kp{2.0}, pid14Ki{0.5}, pid14Kd{0.1};
     double pid15Kp{2.0}, pid15Ki{0.5}, pid15Kd{0.1};
+
+    // Phase 4: Watchdog state
+    bool watchdogEnabled{false};
+    int watchdogTimeout{300};
+    std::string watchdogAction{"all_off"};
+    int watchdogProfile{0};
+    bool watchdogTriggered{false};
+    int watchdogRemaining{-1};
+
+    // Phase 4: Current alert state
+    bool currentAlertEnabled{false};
+    double currentAlertThreshold{5.0};
+    double currentDraw{0.0};
+    bool overCurrentAlert{false};
 
     // Protocol constants
     static constexpr uint8_t CMD_HEADER = 0x24;

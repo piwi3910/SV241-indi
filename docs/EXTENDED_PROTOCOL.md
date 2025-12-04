@@ -1,4 +1,4 @@
-# SV241 Extended Protocol Specification v2.0
+# SV241 Extended Protocol Specification v2.2
 
 This document defines the extended JSON-based protocol for the SV241 custom firmware. The extended protocol provides advanced features while maintaining full backward compatibility with the original binary protocol.
 
@@ -49,7 +49,7 @@ Identify firmware version and capabilities.
 
 ```json
 Request:  {"cmd":"version"}
-Response: {"fw":"SV241-EXT","ver":"2.0.0","caps":["dew","stats","alerts","cal","sched","profiles"]}
+Response: {"fw":"SV241-EXT","ver":"2.2.0","caps":["dew","stats","alerts","cal","sched","profiles","watchdog","current"]}
 ```
 
 Capability flags:
@@ -59,6 +59,8 @@ Capability flags:
 - `cal` - Sensor calibration offsets
 - `sched` - Timer/scheduling features
 - `profiles` - Configuration profiles
+- `watchdog` - Communication watchdog safety mode
+- `current` - Total current threshold alerts
 
 #### status
 Get complete system status in one call (reduces polling overhead).
@@ -208,8 +210,12 @@ Get current alert state.
 
 ```json
 Request:  {"cmd":"alerts"}
-Response: {"low_v":false,"crit_v":false,"thermal":false,"i2c_fail":false}
+Response: {"low_v":false,"crit_v":false,"thermal":false,"i2c_fail":false,"over_current":false,"watchdog":false}
 ```
+
+Additional fields (v2.2.0+):
+- `over_current` - Current draw exceeds threshold
+- `watchdog` - Watchdog timeout triggered
 
 ---
 
@@ -372,6 +378,108 @@ Fields:
 
 ---
 
+### 10. Watchdog / Safety Mode
+
+The watchdog feature monitors USB communication and takes action if no commands are received within the timeout period. This protects equipment if the control computer crashes or loses connection.
+
+#### watchdog
+Get or set watchdog configuration.
+
+**Get configuration:**
+```json
+Request:  {"cmd":"watchdog"}
+Response: {
+  "enabled": true,
+  "timeout": 300,
+  "action": "all_off",
+  "profile": 0,
+  "triggered": false,
+  "remaining": 285
+}
+```
+
+Fields:
+- `enabled` - Watchdog enabled/disabled
+- `timeout` - Timeout in seconds (0-65535)
+- `action` - Action on timeout: "none", "all_off", or "profile"
+- `profile` - Profile slot to load if action is "profile" (0-3)
+- `triggered` - Whether watchdog has fired (read-only)
+- `remaining` - Seconds until timeout, -1 if disabled or triggered (read-only)
+
+**Set configuration:**
+```json
+Request:  {"cmd":"watchdog","enabled":true,"timeout":300,"action":"all_off"}
+Response: {"ok":true}
+```
+
+```json
+Request:  {"cmd":"watchdog","enabled":true,"timeout":600,"action":"profile","profile":2}
+Response: {"ok":true}
+```
+
+**Reset watchdog timer:**
+Any command received by the firmware resets the watchdog timer. Additionally, you can explicitly feed the watchdog:
+
+```json
+Request:  {"cmd":"watchdog","feed":true}
+Response: {"ok":true}
+```
+
+**Clear triggered state:**
+After a watchdog fires, the triggered flag must be cleared to re-arm:
+
+```json
+Request:  {"cmd":"watchdog","clear":true}
+Response: {"ok":true}
+```
+
+Actions:
+- `none` - Set alert flag only, do not change outputs
+- `all_off` - Turn off all DC and USB ports, set all PWM to 0
+- `profile` - Load a specific profile slot (useful for safe shutdown configuration)
+
+---
+
+### 11. Current Threshold Alert
+
+Monitor total current draw and alert when it exceeds a threshold. Useful for detecting shorts or overloads.
+
+#### current_alert
+Get or set current alert configuration.
+
+**Get configuration:**
+```json
+Request:  {"cmd":"current_alert"}
+Response: {
+  "enabled": true,
+  "threshold": 5.0,
+  "current": 2.34,
+  "alert": false
+}
+```
+
+Fields:
+- `enabled` - Alert enabled/disabled
+- `threshold` - Alert threshold in amps
+- `current` - Current draw reading (read-only)
+- `alert` - Whether alert is active (read-only)
+
+**Set configuration:**
+```json
+Request:  {"cmd":"current_alert","enabled":true,"threshold":5.0}
+Response: {"ok":true}
+```
+
+**Clear alert:**
+```json
+Request:  {"cmd":"current_alert","clear":true}
+Response: {"ok":true}
+```
+
+Note: The alert is automatically cleared when current drops below the threshold. The clear command can be used to manually reset the alert state.
+
+---
+
 ## Error Responses
 
 All commands can return error responses:
@@ -403,6 +511,10 @@ All commands can return error responses:
 - `timers`
 - `temp_rate`
 - `dew_pid` tuning
+
+### Phase 4 (Safety)
+- `watchdog` - Communication watchdog with configurable actions
+- `current_alert` - Total current threshold monitoring
 
 ---
 

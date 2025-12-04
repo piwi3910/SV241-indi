@@ -361,6 +361,42 @@ bool SV241::initProperties()
     PID15NP[2].fill("PID15_KD", "Kd", "%.2f", 0, 2, 0.01, 0.1);
     PID15NP.fill(getDeviceName(), "PID_CH15", "PID CH15", "Dew Control", IP_RW, 60, IPS_IDLE);
 
+    // Phase 4: Watchdog
+    WatchdogEnableSP[0].fill("WATCHDOG_ON", "Enable", ISS_OFF);
+    WatchdogEnableSP[1].fill("WATCHDOG_OFF", "Disable", ISS_ON);
+    WatchdogEnableSP.fill(getDeviceName(), "WATCHDOG_ENABLE", "Watchdog", "Safety", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    WatchdogTimeoutNP[0].fill("WATCHDOG_TIMEOUT", "Timeout (s)", "%.0f", 0, 65535, 60, 300);
+    WatchdogTimeoutNP.fill(getDeviceName(), "WATCHDOG_TIMEOUT", "Watchdog Timeout", "Safety", IP_RW, 60, IPS_IDLE);
+
+    WatchdogActionSP[0].fill("WD_NONE", "Alert Only", ISS_OFF);
+    WatchdogActionSP[1].fill("WD_ALL_OFF", "All Off", ISS_ON);
+    WatchdogActionSP[2].fill("WD_PROFILE", "Load Profile", ISS_OFF);
+    WatchdogActionSP.fill(getDeviceName(), "WATCHDOG_ACTION", "Watchdog Action", "Safety", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    WatchdogProfileNP[0].fill("WATCHDOG_PROFILE", "Profile Slot", "%.0f", 0, 3, 1, 0);
+    WatchdogProfileNP.fill(getDeviceName(), "WATCHDOG_PROFILE", "Safety Profile", "Safety", IP_RW, 60, IPS_IDLE);
+
+    WatchdogStatusLP[0].fill("WATCHDOG_TRIGGERED", "Triggered", IPS_IDLE);
+    WatchdogStatusLP.fill(getDeviceName(), "WATCHDOG_STATUS", "Watchdog Status", "Safety", IPS_IDLE);
+
+    WatchdogRemainingNP[0].fill("WATCHDOG_REMAINING", "Remaining (s)", "%.0f", -1, 65535, 1, -1);
+    WatchdogRemainingNP.fill(getDeviceName(), "WATCHDOG_REMAINING", "Time Remaining", "Safety", IP_RO, 60, IPS_IDLE);
+
+    // Phase 4: Current alert
+    CurrentAlertEnableSP[0].fill("CURRENT_ALERT_ON", "Enable", ISS_OFF);
+    CurrentAlertEnableSP[1].fill("CURRENT_ALERT_OFF", "Disable", ISS_ON);
+    CurrentAlertEnableSP.fill(getDeviceName(), "CURRENT_ALERT_ENABLE", "Current Alert", "Safety", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    CurrentAlertThresholdNP[0].fill("CURRENT_THRESHOLD", "Threshold (A)", "%.1f", 0.1, 10.0, 0.1, 5.0);
+    CurrentAlertThresholdNP.fill(getDeviceName(), "CURRENT_THRESHOLD", "Current Threshold", "Safety", IP_RW, 60, IPS_IDLE);
+
+    CurrentAlertStatusLP[0].fill("OVER_CURRENT", "Over Current", IPS_IDLE);
+    CurrentAlertStatusLP.fill(getDeviceName(), "CURRENT_ALERT_STATUS", "Current Status", "Safety", IPS_IDLE);
+
+    CurrentDrawNP[0].fill("CURRENT_DRAW", "Current (A)", "%.2f", 0, 10, 0.01, 0);
+    CurrentDrawNP.fill(getDeviceName(), "CURRENT_DRAW", "Current Draw", "Safety", IP_RO, 60, IPS_IDLE);
+
     // Set driver info
     addAuxControls();
 
@@ -466,6 +502,20 @@ bool SV241::updateProperties()
             defineProperty(PID14NP);
             defineProperty(PID15NP);
 
+            // Phase 4: Watchdog
+            defineProperty(WatchdogEnableSP);
+            defineProperty(WatchdogTimeoutNP);
+            defineProperty(WatchdogActionSP);
+            defineProperty(WatchdogProfileNP);
+            defineProperty(WatchdogStatusLP);
+            defineProperty(WatchdogRemainingNP);
+
+            // Phase 4: Current alert
+            defineProperty(CurrentAlertEnableSP);
+            defineProperty(CurrentAlertThresholdNP);
+            defineProperty(CurrentAlertStatusLP);
+            defineProperty(CurrentDrawNP);
+
             // Get initial extended status
             extGetStatus();
             extGetDewStatus();
@@ -482,6 +532,10 @@ bool SV241::updateProperties()
             extGetTempRate();
             extGetDewPid(14);
             extGetDewPid(15);
+
+            // Phase 4: Get initial watchdog and current alert status
+            extGetWatchdog();
+            extGetCurrentAlert();
         }
         else
         {
@@ -559,6 +613,20 @@ bool SV241::updateProperties()
             // Phase 3: PID tuning
             deleteProperty(PID14NP);
             deleteProperty(PID15NP);
+
+            // Phase 4: Watchdog
+            deleteProperty(WatchdogEnableSP);
+            deleteProperty(WatchdogTimeoutNP);
+            deleteProperty(WatchdogActionSP);
+            deleteProperty(WatchdogProfileNP);
+            deleteProperty(WatchdogStatusLP);
+            deleteProperty(WatchdogRemainingNP);
+
+            // Phase 4: Current alert
+            deleteProperty(CurrentAlertEnableSP);
+            deleteProperty(CurrentAlertThresholdNP);
+            deleteProperty(CurrentAlertStatusLP);
+            deleteProperty(CurrentDrawNP);
         }
 
         hasExtendedFirmware = false;
@@ -1944,6 +2012,133 @@ bool SV241::extSetDewPid(int channel, double kp, double ki, double kd)
     return ok;
 }
 
+// Phase 4: Watchdog functions
+bool SV241::extGetWatchdog()
+{
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"watchdog\"}", response))
+        return false;
+
+    watchdogEnabled = getJsonBool(response, "enabled");
+    watchdogTimeout = getJsonInt(response, "timeout");
+    std::string action = getJsonString(response, "action");
+    if (!action.empty())
+        watchdogAction = action;
+    watchdogProfile = getJsonInt(response, "profile");
+    watchdogTriggered = getJsonBool(response, "triggered");
+    watchdogRemaining = getJsonInt(response, "remaining", -1);
+
+    // Update UI
+    WatchdogEnableSP[0].setState(watchdogEnabled ? ISS_ON : ISS_OFF);
+    WatchdogEnableSP[1].setState(watchdogEnabled ? ISS_OFF : ISS_ON);
+    WatchdogEnableSP.setState(IPS_OK);
+    WatchdogEnableSP.apply();
+
+    WatchdogTimeoutNP[0].setValue(watchdogTimeout);
+    WatchdogTimeoutNP.setState(IPS_OK);
+    WatchdogTimeoutNP.apply();
+
+    WatchdogActionSP[0].setState(watchdogAction == "none" ? ISS_ON : ISS_OFF);
+    WatchdogActionSP[1].setState(watchdogAction == "all_off" ? ISS_ON : ISS_OFF);
+    WatchdogActionSP[2].setState(watchdogAction == "profile" ? ISS_ON : ISS_OFF);
+    WatchdogActionSP.setState(IPS_OK);
+    WatchdogActionSP.apply();
+
+    WatchdogProfileNP[0].setValue(watchdogProfile);
+    WatchdogProfileNP.setState(IPS_OK);
+    WatchdogProfileNP.apply();
+
+    WatchdogStatusLP[0].setState(watchdogTriggered ? IPS_ALERT : IPS_IDLE);
+    WatchdogStatusLP.setState(watchdogTriggered ? IPS_ALERT : IPS_OK);
+    WatchdogStatusLP.apply();
+
+    WatchdogRemainingNP[0].setValue(watchdogRemaining);
+    WatchdogRemainingNP.setState(IPS_OK);
+    WatchdogRemainingNP.apply();
+
+    return true;
+}
+
+bool SV241::extSetWatchdog(bool enabled, int timeout, const std::string &action, int profile)
+{
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"watchdog\",\"enabled\":" << (enabled ? "true" : "false")
+        << ",\"timeout\":" << timeout
+        << ",\"action\":\"" << action << "\""
+        << ",\"profile\":" << profile << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        watchdogEnabled = enabled;
+        watchdogTimeout = timeout;
+        watchdogAction = action;
+        watchdogProfile = profile;
+        LOGF_INFO("Watchdog config updated: enabled=%d timeout=%ds action=%s profile=%d",
+                  enabled, timeout, action.c_str(), profile);
+    }
+
+    return ok;
+}
+
+// Phase 4: Current alert functions
+bool SV241::extGetCurrentAlert()
+{
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"current_alert\"}", response))
+        return false;
+
+    currentAlertEnabled = getJsonBool(response, "enabled");
+    currentAlertThreshold = getJsonDouble(response, "threshold", 5.0);
+    currentDraw = getJsonDouble(response, "current", 0.0);
+    overCurrentAlert = getJsonBool(response, "alert");
+
+    // Update UI
+    CurrentAlertEnableSP[0].setState(currentAlertEnabled ? ISS_ON : ISS_OFF);
+    CurrentAlertEnableSP[1].setState(currentAlertEnabled ? ISS_OFF : ISS_ON);
+    CurrentAlertEnableSP.setState(IPS_OK);
+    CurrentAlertEnableSP.apply();
+
+    CurrentAlertThresholdNP[0].setValue(currentAlertThreshold);
+    CurrentAlertThresholdNP.setState(IPS_OK);
+    CurrentAlertThresholdNP.apply();
+
+    CurrentAlertStatusLP[0].setState(overCurrentAlert ? IPS_ALERT : IPS_IDLE);
+    CurrentAlertStatusLP.setState(overCurrentAlert ? IPS_ALERT : IPS_OK);
+    CurrentAlertStatusLP.apply();
+
+    CurrentDrawNP[0].setValue(currentDraw);
+    CurrentDrawNP.setState(IPS_OK);
+    CurrentDrawNP.apply();
+
+    return true;
+}
+
+bool SV241::extSetCurrentAlert(bool enabled, double threshold)
+{
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"current_alert\",\"enabled\":" << (enabled ? "true" : "false")
+        << ",\"threshold\":" << threshold << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        currentAlertEnabled = enabled;
+        currentAlertThreshold = threshold;
+        LOGF_INFO("Current alert config updated: enabled=%d threshold=%.1fA", enabled, threshold);
+    }
+
+    return ok;
+}
+
 void SV241::TimerHit()
 {
     if (!isConnected())
@@ -1962,6 +2157,10 @@ void SV241::TimerHit()
         // Phase 3: Update timer status and temperature rate
         extGetTimers();
         extGetTempRate();
+
+        // Phase 4: Update watchdog and current alert status
+        extGetWatchdog();
+        extGetCurrentAlert();
     }
 
     SetTimer(POLL_INTERVAL_MS);
@@ -2162,6 +2361,57 @@ bool SV241::ISNewNumber(const char *dev, const char *name, double values[], char
                     PID15NP.setState(IPS_ALERT);
                 }
                 PID15NP.apply();
+                return true;
+            }
+
+            // Phase 4: Watchdog timeout
+            if (WatchdogTimeoutNP.isNameMatch(name))
+            {
+                int timeout = static_cast<int>(values[0]);
+                if (extSetWatchdog(watchdogEnabled, timeout, watchdogAction, watchdogProfile))
+                {
+                    WatchdogTimeoutNP[0].setValue(timeout);
+                    WatchdogTimeoutNP.setState(IPS_OK);
+                }
+                else
+                {
+                    WatchdogTimeoutNP.setState(IPS_ALERT);
+                }
+                WatchdogTimeoutNP.apply();
+                return true;
+            }
+
+            // Phase 4: Watchdog profile slot
+            if (WatchdogProfileNP.isNameMatch(name))
+            {
+                int profile = static_cast<int>(values[0]);
+                if (extSetWatchdog(watchdogEnabled, watchdogTimeout, watchdogAction, profile))
+                {
+                    WatchdogProfileNP[0].setValue(profile);
+                    WatchdogProfileNP.setState(IPS_OK);
+                }
+                else
+                {
+                    WatchdogProfileNP.setState(IPS_ALERT);
+                }
+                WatchdogProfileNP.apply();
+                return true;
+            }
+
+            // Phase 4: Current alert threshold
+            if (CurrentAlertThresholdNP.isNameMatch(name))
+            {
+                double threshold = values[0];
+                if (extSetCurrentAlert(currentAlertEnabled, threshold))
+                {
+                    CurrentAlertThresholdNP[0].setValue(threshold);
+                    CurrentAlertThresholdNP.setState(IPS_OK);
+                }
+                else
+                {
+                    CurrentAlertThresholdNP.setState(IPS_ALERT);
+                }
+                CurrentAlertThresholdNP.apply();
                 return true;
             }
         }
@@ -2583,6 +2833,64 @@ bool SV241::ISNewSwitch(const char *dev, const char *name, ISState *states, char
                 for (int i = 0; i < 4; i++)
                     TimerCancelSP[i].setState(ISS_OFF);
                 TimerCancelSP.apply();
+                return true;
+            }
+
+            // Phase 4: Watchdog enable/disable
+            if (WatchdogEnableSP.isNameMatch(name))
+            {
+                WatchdogEnableSP.update(states, names, n);
+                bool enabled = (WatchdogEnableSP[0].getState() == ISS_ON);
+                if (extSetWatchdog(enabled, watchdogTimeout, watchdogAction, watchdogProfile))
+                {
+                    WatchdogEnableSP.setState(IPS_OK);
+                }
+                else
+                {
+                    WatchdogEnableSP.setState(IPS_ALERT);
+                }
+                WatchdogEnableSP.apply();
+                return true;
+            }
+
+            // Phase 4: Watchdog action
+            if (WatchdogActionSP.isNameMatch(name))
+            {
+                WatchdogActionSP.update(states, names, n);
+                std::string action;
+                if (WatchdogActionSP[0].getState() == ISS_ON)
+                    action = "none";
+                else if (WatchdogActionSP[1].getState() == ISS_ON)
+                    action = "all_off";
+                else
+                    action = "profile";
+
+                if (extSetWatchdog(watchdogEnabled, watchdogTimeout, action, watchdogProfile))
+                {
+                    WatchdogActionSP.setState(IPS_OK);
+                }
+                else
+                {
+                    WatchdogActionSP.setState(IPS_ALERT);
+                }
+                WatchdogActionSP.apply();
+                return true;
+            }
+
+            // Phase 4: Current alert enable/disable
+            if (CurrentAlertEnableSP.isNameMatch(name))
+            {
+                CurrentAlertEnableSP.update(states, names, n);
+                bool enabled = (CurrentAlertEnableSP[0].getState() == ISS_ON);
+                if (extSetCurrentAlert(enabled, currentAlertThreshold))
+                {
+                    CurrentAlertEnableSP.setState(IPS_OK);
+                }
+                else
+                {
+                    CurrentAlertEnableSP.setState(IPS_ALERT);
+                }
+                CurrentAlertEnableSP.apply();
                 return true;
             }
         }

@@ -36,7 +36,7 @@
 // ============================================================================
 
 #define FIRMWARE_NAME    "SV241-EXT"
-#define FIRMWARE_VERSION "2.1.0"
+#define FIRMWARE_VERSION "2.2.0"
 
 // ============================================================================
 // PIN DEFINITIONS
@@ -97,7 +97,9 @@
 #define EEPROM_ADDR_DEW       20   // Dew config (64 bytes)
 #define EEPROM_ADDR_ALERTS    90   // Alert config (16 bytes)
 #define EEPROM_ADDR_NAMES     110  // Port names (160 bytes)
-#define EEPROM_ADDR_PROFILES  280  // Profiles (3x64 = 192 bytes)
+#define EEPROM_ADDR_PROFILES  280  // Profiles (4x64 = 256 bytes, ends at 472)
+#define EEPROM_ADDR_WATCHDOG  472  // Watchdog config (8 bytes)
+#define EEPROM_ADDR_CURRENT   480  // Current alert config (8 bytes)
 
 // Phase 3 constants
 #define MAX_PROFILES          4
@@ -153,6 +155,27 @@ struct AlertState {
     bool critVoltage;
     bool thermal;
     bool i2cFail;
+    bool overCurrent;  // New: over-current alert
+};
+
+// Watchdog configuration (stored in EEPROM)
+enum WatchdogAction {
+    WD_ACTION_NONE = 0,      // Just set alert flag
+    WD_ACTION_ALL_OFF = 1,   // Turn off all outputs
+    WD_ACTION_PROFILE = 2    // Load a specific profile
+};
+
+struct WatchdogConfig {
+    bool enabled;
+    uint16_t timeoutSeconds;  // 0 = disabled, max 65535 (~18 hours)
+    WatchdogAction action;
+    uint8_t profileSlot;      // Profile to load if action == WD_ACTION_PROFILE
+};
+
+// Current alert configuration (stored in EEPROM)
+struct CurrentAlertConfig {
+    bool enabled;
+    float thresholdAmps;  // Alert when current exceeds this
 };
 
 // Port names (stored in EEPROM)
@@ -224,7 +247,15 @@ DewConfig dewConfig[2] = {
 
 // Alerts
 AlertConfig alertConfig = {true, 11.5, true, 11.0, true};
-AlertState alertState = {false, false, false, false};
+AlertState alertState = {false, false, false, false, false};
+
+// Watchdog
+WatchdogConfig watchdogConfig = {false, 300, WD_ACTION_ALL_OFF, 0};  // Default: disabled, 5 min timeout
+unsigned long lastCommandTime = 0;  // Time of last received command
+bool watchdogTriggered = false;     // Has watchdog fired this session?
+
+// Current alert
+CurrentAlertConfig currentAlertConfig = {false, 5.0};  // Default: disabled, 5A threshold
 
 // Port names (with defaults)
 PortNames portNames = {
@@ -326,6 +357,13 @@ void handleCmdTimerList(JsonDocument& doc);
 void handleCmdTimerCancel(JsonDocument& doc);
 void handleCmdTempRate(JsonDocument& doc);
 void handleCmdDewPid(JsonDocument& doc);
+void handleCmdWatchdog(JsonDocument& doc);
+void handleCmdCurrentAlert(JsonDocument& doc);
+
+// Watchdog and safety
+void checkWatchdog();
+void executeWatchdogAction();
+void feedWatchdog();
 
 // Output control
 void setDCOutput(uint8_t index, bool state);
@@ -345,6 +383,8 @@ void saveCalibration();
 void saveDewConfig();
 void saveAlertConfig();
 void savePortNames();
+void saveWatchdogConfig();
+void saveCurrentAlertConfig();
 void loadProfiles();
 void saveProfile(int slot);
 
@@ -438,6 +478,10 @@ void loop() {
                                  (inputVoltage < alertConfig.critVoltageThreshold);
         alertState.i2cFail = !i2cHealthy;
 
+        // Check over-current alert
+        alertState.overCurrent = currentAlertConfig.enabled &&
+                                 (inputCurrent > currentAlertConfig.thresholdAmps);
+
         // Auto-shutdown on critical voltage
         if (alertState.critVoltage && alertConfig.critAutoOff) {
             // Turn off dew heaters to save power
@@ -446,6 +490,13 @@ void loop() {
             pwmValues[1] = 0;
             pwmValues[2] = 0;
         }
+    }
+
+    // Watchdog check (every second)
+    static unsigned long lastWatchdogCheck = 0;
+    if (millis() - lastWatchdogCheck > 1000) {
+        lastWatchdogCheck = millis();
+        checkWatchdog();
     }
 
     // Dew control update (every 5 seconds)
@@ -560,6 +611,8 @@ void loadConfig() {
         saveDewConfig();
         saveAlertConfig();
         savePortNames();
+        saveWatchdogConfig();
+        saveCurrentAlertConfig();
         EEPROM.commit();
         return;
     }
@@ -575,6 +628,12 @@ void loadConfig() {
 
     // Load port names
     EEPROM.get(EEPROM_ADDR_NAMES, portNames);
+
+    // Load watchdog config
+    EEPROM.get(EEPROM_ADDR_WATCHDOG, watchdogConfig);
+
+    // Load current alert config
+    EEPROM.get(EEPROM_ADDR_CURRENT, currentAlertConfig);
 
     if (debugMode) Serial.println("EEPROM: Config loaded");
 }
@@ -596,6 +655,16 @@ void saveAlertConfig() {
 
 void savePortNames() {
     EEPROM.put(EEPROM_ADDR_NAMES, portNames);
+    EEPROM.commit();
+}
+
+void saveWatchdogConfig() {
+    EEPROM.put(EEPROM_ADDR_WATCHDOG, watchdogConfig);
+    EEPROM.commit();
+}
+
+void saveCurrentAlertConfig() {
+    EEPROM.put(EEPROM_ADDR_CURRENT, currentAlertConfig);
     EEPROM.commit();
 }
 
@@ -949,6 +1018,9 @@ void processSerialCommand() {
 }
 
 void handleCommand(uint8_t* cmd, uint8_t len) {
+    // Feed the watchdog on any command received
+    feedWatchdog();
+
     uint8_t cmdId = cmd[2];
 
     if (cmdId == CMD_EXTENDED) {
@@ -1039,6 +1111,10 @@ void handleExtendedCommand(uint8_t* payload, uint8_t len) {
         handleCmdTempRate(doc);
     } else if (strcmp(cmd, "dew_pid") == 0) {
         handleCmdDewPid(doc);
+    } else if (strcmp(cmd, "watchdog") == 0) {
+        handleCmdWatchdog(doc);
+    } else if (strcmp(cmd, "current_alert") == 0) {
+        handleCmdCurrentAlert(doc);
     } else {
         sendJsonResponse("{\"err\":\"unknown_cmd\"}");
     }
@@ -1061,6 +1137,8 @@ void handleCmdVersion(JsonDocument& doc) {
     caps.add("profiles");
     caps.add("timers");
     caps.add("temp_rate");
+    caps.add("watchdog");
+    caps.add("current_alert");
 
     char json[256];
     serializeJson(resp, json, sizeof(json));
@@ -1232,8 +1310,10 @@ void handleCmdAlerts(JsonDocument& doc) {
     resp["crit_v"] = alertState.critVoltage;
     resp["thermal"] = alertState.thermal;
     resp["i2c_fail"] = alertState.i2cFail;
+    resp["over_current"] = alertState.overCurrent;
+    resp["watchdog"] = watchdogTriggered;
 
-    char json[128];
+    char json[192];
     serializeJson(resp, json, sizeof(json));
     sendJsonResponse(json);
 }
@@ -2008,5 +2088,212 @@ void handleCmdDewPid(JsonDocument& doc) {
         char json[128];
         serializeJson(resp, json, sizeof(json));
         sendJsonResponse(json);
+    }
+}
+
+// ============================================================================
+// WATCHDOG COMMAND HANDLER
+// ============================================================================
+
+void handleCmdWatchdog(JsonDocument& doc) {
+    // Check if setting or getting
+    bool setting = doc.containsKey("enabled") || doc.containsKey("timeout") ||
+                   doc.containsKey("action") || doc.containsKey("profile");
+
+    if (setting) {
+        if (doc.containsKey("enabled")) {
+            watchdogConfig.enabled = doc["enabled"];
+        }
+        if (doc.containsKey("timeout")) {
+            watchdogConfig.timeoutSeconds = doc["timeout"];
+        }
+        if (doc.containsKey("action")) {
+            const char* action = doc["action"];
+            if (strcmp(action, "none") == 0) {
+                watchdogConfig.action = WD_ACTION_NONE;
+            } else if (strcmp(action, "all_off") == 0) {
+                watchdogConfig.action = WD_ACTION_ALL_OFF;
+            } else if (strcmp(action, "profile") == 0) {
+                watchdogConfig.action = WD_ACTION_PROFILE;
+            }
+        }
+        if (doc.containsKey("profile")) {
+            watchdogConfig.profileSlot = doc["profile"];
+        }
+
+        // Reset watchdog state when config changes
+        watchdogTriggered = false;
+        lastCommandTime = millis();
+
+        saveWatchdogConfig();
+        sendJsonResponse("{\"ok\":true}");
+    } else {
+        // Return current watchdog config and status
+        JsonDocument resp;
+        resp["enabled"] = watchdogConfig.enabled;
+        resp["timeout"] = watchdogConfig.timeoutSeconds;
+
+        const char* actionStr;
+        switch (watchdogConfig.action) {
+            case WD_ACTION_NONE: actionStr = "none"; break;
+            case WD_ACTION_ALL_OFF: actionStr = "all_off"; break;
+            case WD_ACTION_PROFILE: actionStr = "profile"; break;
+            default: actionStr = "unknown"; break;
+        }
+        resp["action"] = actionStr;
+        resp["profile"] = watchdogConfig.profileSlot;
+        resp["triggered"] = watchdogTriggered;
+
+        // Calculate remaining time before watchdog fires
+        if (watchdogConfig.enabled && !watchdogTriggered) {
+            unsigned long elapsed = (millis() - lastCommandTime) / 1000;
+            int remaining = watchdogConfig.timeoutSeconds - elapsed;
+            resp["remaining"] = remaining > 0 ? remaining : 0;
+        } else {
+            resp["remaining"] = -1;
+        }
+
+        char json[256];
+        serializeJson(resp, json, sizeof(json));
+        sendJsonResponse(json);
+    }
+}
+
+// ============================================================================
+// CURRENT ALERT COMMAND HANDLER
+// ============================================================================
+
+void handleCmdCurrentAlert(JsonDocument& doc) {
+    // Check if setting or getting
+    bool setting = doc.containsKey("enabled") || doc.containsKey("threshold");
+
+    if (setting) {
+        if (doc.containsKey("enabled")) {
+            currentAlertConfig.enabled = doc["enabled"];
+        }
+        if (doc.containsKey("threshold")) {
+            currentAlertConfig.thresholdAmps = doc["threshold"];
+        }
+
+        saveCurrentAlertConfig();
+        sendJsonResponse("{\"ok\":true}");
+    } else {
+        // Return current config and status
+        JsonDocument resp;
+        resp["enabled"] = currentAlertConfig.enabled;
+        resp["threshold"] = currentAlertConfig.thresholdAmps;
+        resp["current"] = roundf(inputCurrent * 100) / 100;
+        resp["alert"] = alertState.overCurrent;
+
+        char json[128];
+        serializeJson(resp, json, sizeof(json));
+        sendJsonResponse(json);
+    }
+}
+
+// ============================================================================
+// WATCHDOG FUNCTIONS
+// ============================================================================
+
+void feedWatchdog() {
+    // Called when any command is received to reset the watchdog timer
+    lastCommandTime = millis();
+
+    // If watchdog had triggered, reset the flag when communication resumes
+    if (watchdogTriggered) {
+        watchdogTriggered = false;
+        if (debugMode) {
+            Serial.println("Watchdog: Communication restored, flag cleared");
+        }
+    }
+}
+
+void checkWatchdog() {
+    // Skip if disabled or already triggered
+    if (!watchdogConfig.enabled || watchdogTriggered) {
+        return;
+    }
+
+    // Skip if timeout is 0
+    if (watchdogConfig.timeoutSeconds == 0) {
+        return;
+    }
+
+    // Check if timeout has elapsed
+    unsigned long elapsed = (millis() - lastCommandTime) / 1000;
+    if (elapsed >= watchdogConfig.timeoutSeconds) {
+        watchdogTriggered = true;
+        if (debugMode) {
+            Serial.printf("Watchdog: Timeout after %lu seconds!\n", elapsed);
+        }
+        executeWatchdogAction();
+    }
+}
+
+void executeWatchdogAction() {
+    if (debugMode) {
+        Serial.printf("Watchdog: Executing action %d\n", watchdogConfig.action);
+    }
+
+    switch (watchdogConfig.action) {
+        case WD_ACTION_NONE:
+            // Just set the alert flag, don't change outputs
+            break;
+
+        case WD_ACTION_ALL_OFF:
+            // Turn off all DC outputs
+            for (int i = 0; i < 7; i++) {
+                setDCOutput(i, false);
+                dcStates[i] = false;
+            }
+            // Turn off all PWM outputs
+            for (int i = 0; i < 3; i++) {
+                setPWMOutput(i, 0);
+                pwmValues[i] = 0;
+            }
+            // Disable auto dew
+            dewConfig[0].autoMode = false;
+            dewConfig[1].autoMode = false;
+            if (debugMode) {
+                Serial.println("Watchdog: All outputs disabled");
+            }
+            break;
+
+        case WD_ACTION_PROFILE:
+            // Load the specified profile
+            if (watchdogConfig.profileSlot < MAX_PROFILES &&
+                profiles[watchdogConfig.profileSlot].valid) {
+                Profile& p = profiles[watchdogConfig.profileSlot];
+                for (int i = 0; i < 7; i++) {
+                    setDCOutput(i, p.dcStates[i]);
+                    dcStates[i] = p.dcStates[i];
+                }
+                for (int i = 0; i < 3; i++) {
+                    setPWMOutput(i, p.pwmValues[i]);
+                    pwmValues[i] = p.pwmValues[i];
+                }
+                dewConfig[0].autoMode = p.autoDew[0];
+                dewConfig[0].margin = p.dewMargin[0];
+                dewConfig[1].autoMode = p.autoDew[1];
+                dewConfig[1].margin = p.dewMargin[1];
+                activeProfile = watchdogConfig.profileSlot;
+                if (debugMode) {
+                    Serial.printf("Watchdog: Loaded profile '%s'\n", p.name);
+                }
+            } else {
+                // Profile not valid, fall back to all off
+                for (int i = 0; i < 7; i++) {
+                    setDCOutput(i, false);
+                    dcStates[i] = false;
+                }
+                for (int i = 0; i < 3; i++) {
+                    setPWMOutput(i, 0);
+                    pwmValues[i] = 0;
+                }
+                if (debugMode) {
+                    Serial.println("Watchdog: Profile invalid, all outputs disabled");
+                }
+            }
+            break;
     }
 }
