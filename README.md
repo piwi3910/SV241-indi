@@ -28,15 +28,33 @@ The C++ INDI driver now implements all core functionalities of the device:
 - ✅ State synchronization on connect.
 - ✅ Periodic polling of sensors.
 
-## Development and Installation
+## Repository Structure
 
-### Requirements
+The repository has been cleaned up to focus solely on the C++ driver.
+
+```
+sv241-indi/
+├── docs/                   # Protocol documentation
+│   └── SV241_PROTOCOL.md
+├── driver/                 # INDI driver source code (C++)
+│   ├── indi_sv241.cpp      # Driver implementation
+│   ├── indi_sv241.h
+│   └── indi_sv241.xml      # INDI driver definition
+│
+├── scripts/                # Test scripts
+│   └── test_driver.sh
+└── README.md               # This file
+```
+
+## Installation
+
+### 1. Requirements
 - **OS**: Linux or macOS
 - **C++ Compiler**: g++ or clang with C++11 support
 - **CMake**: 3.10 or later
 - **INDI Library**: 1.9.0 or later
 
-### 1. Install Dependencies
+### 2. Install Dependencies
 
 **Ubuntu/Debian:**
 ```bash
@@ -48,25 +66,24 @@ sudo apt-get install build-essential cmake git libindi-dev
 brew install cmake indi
 ```
 
-### 2. Build the Driver
+### 3. Build the Driver
 
+Before building, you may need to create the build directory:
 ```bash
+mkdir -p driver/build
 cd driver/build
 cmake ..
 make
 ```
 The compiled driver will be located at `driver/build/indi_sv241`.
 
-### 3. Install the Driver
+### 4. Install the Driver
 
+From within the `driver/build` directory:
 ```bash
-cd driver/build
 sudo make install
 ```
-
-This installs:
-- The `indi_sv241` binary to `/usr/local/bin/`
-- The `indi_sv241.xml` driver definition file to the INDI system directory.
+This installs the `indi_sv241` binary and the `indi_sv241.xml` driver definition file to your system's INDI directories.
 
 ## Usage
 
@@ -86,6 +103,18 @@ indiserver -v indi_sv241
 5.  In the INDI Control Panel, go to the **Connection** tab for the SV241 driver.
 6.  Set the correct serial port (e.g., `/dev/tty.usbserial-12340` on macOS or `/dev/ttyUSB0` on Linux).
 7.  Click **Connect**.
+
+## Testing the Driver
+
+A test script is provided in the `scripts` directory to verify the driver's stability. Before running the test, ensure the driver has been built.
+
+```bash
+# Make sure the script is executable
+chmod +x scripts/test_driver.sh
+
+# Run the test
+./scripts/test_driver.sh driver/build/indi_sv241 "C++ Driver"
+```
 
 ## Driver Properties
 
