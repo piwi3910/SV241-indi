@@ -121,17 +121,3 @@ This will:
 2. Connect to the device and read all sensor/switch states.
 3. Disconnect from the device.
 4. Repeat this cycle 3 times to ensure stability.
-
-## Roadmap
-
-With a stable C++ driver, the next phases focus on testing and distribution:
-
-- **Phase 1: Wider Testing**:
-    - Test on a dedicated Linux machine (e.g., Ubuntu).
-    - Test on a Raspberry Pi-based astronomy setup (e.g., Stellarmate, Astroberry).
-    - Test with different INDI clients (KStars/Ekos, N.I.N.A., etc.).
-
-- **Phase 2: Distribution**:
-    - Write a user manual for installation and use.
-    - Submit the driver to the official INDI 3rd-party repository.
-    - Create installation packages if feasible.
