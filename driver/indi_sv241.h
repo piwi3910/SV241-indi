@@ -91,6 +91,24 @@ private:
     bool extGetNames();
     bool extSetName(int idx, const std::string &name);
 
+    // Phase 3: Profiles
+    bool extGetProfiles();
+    bool extSaveProfile(int slot, const std::string &name);
+    bool extLoadProfile(int slot);
+    bool extDeleteProfile(int slot);
+
+    // Phase 3: Timers
+    bool extGetTimers();
+    bool extSetTimer(const std::string &port, const std::string &action, int minutes, int value = 0);
+    bool extCancelTimer(int id);
+
+    // Phase 3: Temperature rate
+    bool extGetTempRate();
+
+    // Phase 3: PID tuning
+    bool extGetDewPid(int channel);
+    bool extSetDewPid(int channel, double kp, double ki, double kd);
+
     // Device control functions
     bool setDCOutput(int channel, bool enabled);
     bool setPWMValue(int channel, uint8_t value);
@@ -174,6 +192,30 @@ private:
     // Port names (custom labels)
     INDI::PropertyText PortNamesTP{10};  // DC1-DC5, USB12, USB345, PWM13-PWM15
 
+    // Phase 3: Profiles
+    INDI::PropertyText ProfilesTP{4};         // Profile names (4 slots)
+    INDI::PropertySwitch ProfileLoadSP{4};    // Load profile buttons
+    INDI::PropertySwitch ProfileSaveSP{4};    // Save to profile slot buttons
+    INDI::PropertySwitch ProfileDeleteSP{4};  // Delete profile buttons
+    INDI::PropertyText ProfileNameTP{1};      // Name for saving new profile
+    INDI::PropertyNumber ActiveProfileNP{1};  // Currently active profile index
+
+    // Phase 3: Timers
+    INDI::PropertyText TimerStatusTP{4};      // Active timer status (up to 4 displayed)
+    INDI::PropertyText TimerPortTP{1};        // Port name for new timer
+    INDI::PropertySwitch TimerActionSP{3};    // Timer action: On, Off, Set
+    INDI::PropertyNumber TimerMinutesNP{1};   // Minutes until action
+    INDI::PropertyNumber TimerValueNP{1};     // PWM value (for Set action)
+    INDI::PropertySwitch TimerSetSP{1};       // Create timer button
+    INDI::PropertySwitch TimerCancelSP{4};    // Cancel timer buttons
+
+    // Phase 3: Temperature rate
+    INDI::PropertyNumber TempRateNP{1};       // Temperature change rate (C/hour)
+
+    // Phase 3: PID tuning
+    INDI::PropertyNumber PID14NP{3};          // Kp, Ki, Kd for channel 14
+    INDI::PropertyNumber PID15NP{3};          // Kp, Ki, Kd for channel 15
+
     // Internal state
     double currentVoltage{0.0};
     double currentPower{0.0};
@@ -209,6 +251,26 @@ private:
 
     // Port names state
     std::string portNames[10];  // DC1-DC5, USB12, USB345, PWM13-PWM15
+
+    // Phase 3: Profiles state
+    std::string profileNames[4];
+    int activeProfile{-1};
+
+    // Phase 3: Timers state (for display)
+    struct TimerInfo {
+        int id{0};
+        std::string port;
+        std::string action;
+        int remaining{0};
+    };
+    std::vector<TimerInfo> activeTimers;
+
+    // Phase 3: Temperature rate state
+    double tempRate{0.0};
+
+    // Phase 3: PID state
+    double pid14Kp{2.0}, pid14Ki{0.5}, pid14Kd{0.1};
+    double pid15Kp{2.0}, pid15Ki{0.5}, pid15Kd{0.1};
 
     // Protocol constants
     static constexpr uint8_t CMD_HEADER = 0x24;

@@ -10,9 +10,9 @@ INDI driver for the SVBONY SV241 Powerbox, enabling control from Linux-based ast
 | Hardware Testing | ✅ Verified |
 | INDI Driver | ✅ Complete |
 | Basic Firmware (v1.x) | ✅ Available |
-| **Extended Firmware (v2.0)** | ✅ **NEW** |
+| **Extended Firmware (v2.1)** | ✅ **NEW** |
 
-## What's New in v2.0
+## What's New in v2.1
 
 The extended firmware adds powerful new features while maintaining full backward compatibility:
 
@@ -45,6 +45,28 @@ The extended firmware adds powerful new features while maintaining full backward
 - **I2C health monitoring** - Track sensor communication status
 - **Manual I2C recovery** - Force bus recovery if needed
 - **Heap monitoring** - Track available memory
+
+### Configuration Profiles (NEW in v2.1)
+- **Save up to 4 profiles** - Store complete device configuration
+- **Quick profile loading** - Instantly restore your imaging setups
+- **Named profiles** - Give meaningful names like "Widefield", "Planetary"
+- **EEPROM storage** - Profiles persist across power cycles
+
+### Timer Scheduling (NEW in v2.1)
+- **Port timers** - Schedule DC/PWM actions for the future
+- **Multiple actions** - On, Off, or Set to specific value
+- **Up to 8 concurrent timers** - Set it and forget it
+- **Countdown display** - See remaining time in INDI driver
+
+### Temperature Rate Tracking (NEW in v2.1)
+- **Rate of change monitoring** - Track temperature trends (°C/hour)
+- **Predict dew formation** - Anticipate cooling conditions
+- **30-minute rolling average** - Smooth, reliable trend data
+
+### PID Tuning (NEW in v2.1)
+- **Per-channel PID coefficients** - Fine-tune dew heater response
+- **Adjustable Kp, Ki, Kd** - Customize for your equipment
+- **Persistent settings** - Tuning saved to EEPROM
 
 See [firmware/SV241_Extended/README.md](firmware/SV241_Extended/README.md) for complete details.
 
@@ -79,7 +101,7 @@ The INDI driver works with the **original factory firmware**, but there are know
 
 3. **Serial Reconnection Issues** - First read after reconnecting may fail
 
-### Recommended: Extended Firmware (v2.0)
+### Recommended: Extended Firmware (v2.1)
 
 We've created an **extended firmware** that fixes these issues AND adds powerful new features:
 
@@ -92,6 +114,10 @@ We've created an **extended firmware** that fixes these issues AND adds powerful
 ✅ **Voltage alerts** - Get warnings before battery runs low
 ✅ **Sensor calibration** - Fine-tune sensor readings
 ✅ **Custom port names** - Label your equipment connections
+✅ **Configuration profiles** - Save and load complete device setups (NEW)
+✅ **Timer scheduling** - Schedule port actions for the future (NEW)
+✅ **Temperature rate tracking** - Monitor cooling trends (NEW)
+✅ **PID tuning** - Fine-tune auto dew heater response (NEW)
 
 **See [`firmware/SV241_Extended/README.md`](firmware/SV241_Extended/README.md) for:**
 - Complete feature documentation
@@ -147,7 +173,7 @@ sv241-indi/
 │   │   ├── SV241_Custom.ino   # Source code
 │   │   └── SV241_Custom.merged.bin
 │   │
-│   └── SV241_Extended/        # Extended firmware (v2.0) - RECOMMENDED
+│   └── SV241_Extended/        # Extended firmware (v2.1) - RECOMMENDED
 │       ├── README.md          # Complete feature documentation
 │       ├── SV241_Extended.ino # Source code
 │       └── SV241_Extended.ino.merged.bin
@@ -292,7 +318,7 @@ See [docs/SV241_PROTOCOL.md](docs/SV241_PROTOCOL.md) for complete protocol docum
 Several Python scripts are included for testing:
 
 ```bash
-# Test extended firmware v2.0 (recommended)
+# Test extended firmware v2.1 (recommended)
 python scripts/test_extended_firmware.py /dev/ttyUSB0
 
 # Test basic firmware commands

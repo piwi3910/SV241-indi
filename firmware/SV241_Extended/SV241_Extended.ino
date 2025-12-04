@@ -36,7 +36,7 @@
 // ============================================================================
 
 #define FIRMWARE_NAME    "SV241-EXT"
-#define FIRMWARE_VERSION "2.0.0"
+#define FIRMWARE_VERSION "2.1.0"
 
 // ============================================================================
 // PIN DEFINITIONS
@@ -94,10 +94,16 @@
 #define EEPROM_MAGIC          0xSV41
 #define EEPROM_ADDR_MAGIC     0
 #define EEPROM_ADDR_CAL       4    // Calibration offsets (12 bytes)
-#define EEPROM_ADDR_DEW       20   // Dew config (32 bytes)
-#define EEPROM_ADDR_ALERTS    60   // Alert config (16 bytes)
-#define EEPROM_ADDR_NAMES     80   // Port names (7x16 = 112 bytes)
-#define EEPROM_ADDR_PROFILES  200  // Profiles (3x32 = 96 bytes)
+#define EEPROM_ADDR_DEW       20   // Dew config (64 bytes)
+#define EEPROM_ADDR_ALERTS    90   // Alert config (16 bytes)
+#define EEPROM_ADDR_NAMES     110  // Port names (160 bytes)
+#define EEPROM_ADDR_PROFILES  280  // Profiles (3x64 = 192 bytes)
+
+// Phase 3 constants
+#define MAX_PROFILES          4
+#define PROFILE_NAME_LEN      16
+#define MAX_TIMERS            8
+#define TEMP_HISTORY_SIZE     30   // 30 samples for temp rate calculation
 
 // ============================================================================
 // DATA STRUCTURES
@@ -156,6 +162,41 @@ struct PortNames {
     char pwm[3][PORT_NAME_MAX_LEN + 1];  // PWM13, PWM14, PWM15
 };
 
+// Profile (stored in EEPROM)
+struct Profile {
+    char name[PROFILE_NAME_LEN + 1];
+    bool dcStates[7];
+    uint8_t pwmValues[3];
+    bool autoDew[2];
+    float dewMargin[2];
+    bool valid;  // Is this profile slot used?
+};
+
+// Timer action types
+enum TimerAction {
+    TIMER_OFF = 0,
+    TIMER_ON = 1,
+    TIMER_SET = 2
+};
+
+// Active timer
+struct Timer {
+    bool active;
+    uint8_t portType;   // 0=DC, 1=PWM
+    uint8_t portIndex;  // Index within type
+    TimerAction action;
+    uint8_t setValue;   // For TIMER_SET action
+    unsigned long triggerTime;  // millis() when timer fires
+};
+
+// Temperature history for rate calculation
+struct TempHistory {
+    float temps[TEMP_HISTORY_SIZE];
+    unsigned long times[TEMP_HISTORY_SIZE];
+    uint8_t index;
+    uint8_t count;
+};
+
 // ============================================================================
 // GLOBAL STATE
 // ============================================================================
@@ -198,6 +239,17 @@ SessionStats stats;
 uint8_t i2cFailCount = 0;
 bool i2cHealthy = false;
 unsigned long lastI2CRecovery = 0;
+
+// Phase 3: Profiles
+Profile profiles[MAX_PROFILES];
+int8_t activeProfile = -1;  // -1 = no profile active
+
+// Phase 3: Timers
+Timer timers[MAX_TIMERS];
+uint8_t nextTimerId = 1;
+
+// Phase 3: Temperature history for rate calculation
+TempHistory tempHistory;
 
 // INA219 calibration
 uint16_t ina219_calValue = 4096;
@@ -264,6 +316,17 @@ void handleCmdCalSet(JsonDocument& doc);
 void handleCmdNamesGet(JsonDocument& doc);
 void handleCmdNamesSet(JsonDocument& doc);
 
+// Phase 3 command handlers
+void handleCmdProfileList(JsonDocument& doc);
+void handleCmdProfileSave(JsonDocument& doc);
+void handleCmdProfileLoad(JsonDocument& doc);
+void handleCmdProfileDelete(JsonDocument& doc);
+void handleCmdTimerSet(JsonDocument& doc);
+void handleCmdTimerList(JsonDocument& doc);
+void handleCmdTimerCancel(JsonDocument& doc);
+void handleCmdTempRate(JsonDocument& doc);
+void handleCmdDewPid(JsonDocument& doc);
+
 // Output control
 void setDCOutput(uint8_t index, bool state);
 void setPWMOutput(uint8_t channel, uint8_t value);
@@ -282,6 +345,13 @@ void saveCalibration();
 void saveDewConfig();
 void saveAlertConfig();
 void savePortNames();
+void loadProfiles();
+void saveProfile(int slot);
+
+// Phase 3 helpers
+void updateTimers();
+void updateTempHistory();
+float calculateTempRate();
 
 // ============================================================================
 // SETUP
@@ -313,6 +383,18 @@ void setup() {
 
     // Initialize statistics
     resetStats();
+
+    // Initialize temp history
+    tempHistory.index = 0;
+    tempHistory.count = 0;
+
+    // Initialize timers
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        timers[i].active = false;
+    }
+
+    // Load profiles from EEPROM
+    loadProfiles();
 
     if (debugMode) {
         Serial.println("Initialization complete!");
@@ -371,6 +453,20 @@ void loop() {
     if (millis() - lastDewUpdate > 5000) {
         lastDewUpdate = millis();
         updateDewControl();
+    }
+
+    // Timer updates (every second)
+    static unsigned long lastTimerCheck = 0;
+    if (millis() - lastTimerCheck > 1000) {
+        lastTimerCheck = millis();
+        updateTimers();
+    }
+
+    // Temperature history update (every 60 seconds for rate calculation)
+    static unsigned long lastTempHistory = 0;
+    if (millis() - lastTempHistory > 60000) {
+        lastTempHistory = millis();
+        updateTempHistory();
     }
 
     delay(5);
@@ -924,6 +1020,25 @@ void handleExtendedCommand(uint8_t* payload, uint8_t len) {
         handleCmdNamesGet(doc);
     } else if (strcmp(cmd, "names_set") == 0) {
         handleCmdNamesSet(doc);
+    // Phase 3 commands
+    } else if (strcmp(cmd, "profile_list") == 0) {
+        handleCmdProfileList(doc);
+    } else if (strcmp(cmd, "profile_save") == 0) {
+        handleCmdProfileSave(doc);
+    } else if (strcmp(cmd, "profile_load") == 0) {
+        handleCmdProfileLoad(doc);
+    } else if (strcmp(cmd, "profile_delete") == 0) {
+        handleCmdProfileDelete(doc);
+    } else if (strcmp(cmd, "timer_set") == 0) {
+        handleCmdTimerSet(doc);
+    } else if (strcmp(cmd, "timer_list") == 0) {
+        handleCmdTimerList(doc);
+    } else if (strcmp(cmd, "timer_cancel") == 0) {
+        handleCmdTimerCancel(doc);
+    } else if (strcmp(cmd, "temp_rate") == 0) {
+        handleCmdTempRate(doc);
+    } else if (strcmp(cmd, "dew_pid") == 0) {
+        handleCmdDewPid(doc);
     } else {
         sendJsonResponse("{\"err\":\"unknown_cmd\"}");
     }
@@ -943,6 +1058,9 @@ void handleCmdVersion(JsonDocument& doc) {
     caps.add("stats");
     caps.add("alerts");
     caps.add("cal");
+    caps.add("profiles");
+    caps.add("timers");
+    caps.add("temp_rate");
 
     char json[256];
     serializeJson(resp, json, sizeof(json));
@@ -1462,5 +1580,433 @@ void setPWMOutput(uint8_t channel, uint8_t value) {
     uint8_t pins[] = {PIN_PWM13, PIN_PWM14, PIN_PWM15};
     if (channel < 3) {
         ledcWrite(pins[channel], value);
+    }
+}
+
+// ============================================================================
+// PHASE 3: PROFILE FUNCTIONS
+// ============================================================================
+
+void loadProfiles() {
+    for (int i = 0; i < MAX_PROFILES; i++) {
+        EEPROM.get(EEPROM_ADDR_PROFILES + i * sizeof(Profile), profiles[i]);
+        // Validate profile name
+        if (profiles[i].valid && (profiles[i].name[0] == 0 || profiles[i].name[0] == 0xFF)) {
+            profiles[i].valid = false;
+        }
+    }
+}
+
+void saveProfile(int slot) {
+    if (slot >= 0 && slot < MAX_PROFILES) {
+        EEPROM.put(EEPROM_ADDR_PROFILES + slot * sizeof(Profile), profiles[slot]);
+        EEPROM.commit();
+    }
+}
+
+void handleCmdProfileList(JsonDocument& doc) {
+    JsonDocument resp;
+    JsonArray profileList = resp["profiles"].to<JsonArray>();
+
+    for (int i = 0; i < MAX_PROFILES; i++) {
+        if (profiles[i].valid) {
+            JsonObject p = profileList.add<JsonObject>();
+            p["slot"] = i;
+            p["name"] = profiles[i].name;
+        }
+    }
+
+    resp["active"] = activeProfile;
+
+    char json[384];
+    serializeJson(resp, json, sizeof(json));
+    sendJsonResponse(json);
+}
+
+void handleCmdProfileSave(JsonDocument& doc) {
+    int slot = doc["slot"] | -1;
+    if (slot < 0 || slot >= MAX_PROFILES) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"slot\"}");
+        return;
+    }
+
+    const char* name = doc["name"] | "Profile";
+
+    // Save current state to profile
+    strncpy(profiles[slot].name, name, PROFILE_NAME_LEN);
+    profiles[slot].name[PROFILE_NAME_LEN] = '\0';
+
+    for (int i = 0; i < 7; i++) {
+        profiles[slot].dcStates[i] = dcStates[i];
+    }
+    for (int i = 0; i < 3; i++) {
+        profiles[slot].pwmValues[i] = pwmValues[i];
+    }
+    profiles[slot].autoDew[0] = dewConfig[0].autoMode;
+    profiles[slot].autoDew[1] = dewConfig[1].autoMode;
+    profiles[slot].dewMargin[0] = dewConfig[0].margin;
+    profiles[slot].dewMargin[1] = dewConfig[1].margin;
+    profiles[slot].valid = true;
+
+    saveProfile(slot);
+    activeProfile = slot;
+
+    sendJsonResponse("{\"ok\":true}");
+}
+
+void handleCmdProfileLoad(JsonDocument& doc) {
+    int slot = doc["slot"] | -1;
+    if (slot < 0 || slot >= MAX_PROFILES) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"slot\"}");
+        return;
+    }
+
+    if (!profiles[slot].valid) {
+        sendJsonResponse("{\"err\":\"profile_empty\"}");
+        return;
+    }
+
+    // Apply profile settings
+    for (int i = 0; i < 7; i++) {
+        dcStates[i] = profiles[slot].dcStates[i];
+        setDCOutput(i, dcStates[i]);
+    }
+    for (int i = 0; i < 3; i++) {
+        pwmValues[i] = profiles[slot].pwmValues[i];
+        setPWMOutput(i, pwmValues[i]);
+    }
+    dewConfig[0].autoMode = profiles[slot].autoDew[0];
+    dewConfig[1].autoMode = profiles[slot].autoDew[1];
+    dewConfig[0].margin = profiles[slot].dewMargin[0];
+    dewConfig[1].margin = profiles[slot].dewMargin[1];
+
+    activeProfile = slot;
+
+    sendJsonResponse("{\"ok\":true}");
+}
+
+void handleCmdProfileDelete(JsonDocument& doc) {
+    int slot = doc["slot"] | -1;
+    if (slot < 0 || slot >= MAX_PROFILES) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"slot\"}");
+        return;
+    }
+
+    profiles[slot].valid = false;
+    profiles[slot].name[0] = '\0';
+    saveProfile(slot);
+
+    if (activeProfile == slot) {
+        activeProfile = -1;
+    }
+
+    sendJsonResponse("{\"ok\":true}");
+}
+
+// ============================================================================
+// PHASE 3: TIMER FUNCTIONS
+// ============================================================================
+
+void updateTimers() {
+    unsigned long now = millis();
+
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        if (!timers[i].active) continue;
+
+        if (now >= timers[i].triggerTime) {
+            // Timer has fired
+            if (timers[i].portType == 0) {
+                // DC port
+                if (timers[i].portIndex < 7) {
+                    bool state = (timers[i].action == TIMER_ON);
+                    setDCOutput(timers[i].portIndex, state);
+                    dcStates[timers[i].portIndex] = state;
+                }
+            } else {
+                // PWM port
+                if (timers[i].portIndex < 3) {
+                    uint8_t value = 0;
+                    if (timers[i].action == TIMER_ON) {
+                        value = PWM_MAX_VALUE;
+                    } else if (timers[i].action == TIMER_SET) {
+                        value = timers[i].setValue;
+                    }
+                    setPWMOutput(timers[i].portIndex, value);
+                    pwmValues[timers[i].portIndex] = value;
+
+                    // Disable auto mode when timer changes dew heater
+                    if (timers[i].portIndex >= 1 && timers[i].portIndex <= 2) {
+                        dewConfig[timers[i].portIndex - 1].autoMode = false;
+                    }
+                }
+            }
+
+            // Deactivate timer
+            timers[i].active = false;
+
+            if (debugMode) {
+                Serial.printf("Timer %d fired: port_type=%d, port_idx=%d, action=%d\n",
+                              i, timers[i].portType, timers[i].portIndex, timers[i].action);
+            }
+        }
+    }
+}
+
+void handleCmdTimerSet(JsonDocument& doc) {
+    const char* port = doc["port"];
+    if (!port) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"port\"}");
+        return;
+    }
+
+    const char* actionStr = doc["action"];
+    if (!actionStr) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"action\"}");
+        return;
+    }
+
+    int minutes = doc["minutes"] | -1;
+    if (minutes < 0) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"minutes\"}");
+        return;
+    }
+
+    // Parse port name
+    uint8_t portType = 0;  // 0=DC, 1=PWM
+    uint8_t portIndex = 0;
+
+    if (strncmp(port, "dc", 2) == 0) {
+        portType = 0;
+        portIndex = port[2] - '1';  // dc1-dc5 -> 0-4
+        if (portIndex >= 5) {
+            sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"port\"}");
+            return;
+        }
+    } else if (strcmp(port, "usb12") == 0) {
+        portType = 0;
+        portIndex = 5;
+    } else if (strcmp(port, "usb345") == 0) {
+        portType = 0;
+        portIndex = 6;
+    } else if (strncmp(port, "pwm", 3) == 0) {
+        portType = 1;
+        int pwmNum = atoi(port + 3);
+        if (pwmNum == 13) portIndex = 0;
+        else if (pwmNum == 14) portIndex = 1;
+        else if (pwmNum == 15) portIndex = 2;
+        else {
+            sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"port\"}");
+            return;
+        }
+    } else {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"port\"}");
+        return;
+    }
+
+    // Parse action
+    TimerAction action;
+    if (strcmp(actionStr, "off") == 0) {
+        action = TIMER_OFF;
+    } else if (strcmp(actionStr, "on") == 0) {
+        action = TIMER_ON;
+    } else if (strcmp(actionStr, "set") == 0) {
+        action = TIMER_SET;
+    } else {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"action\"}");
+        return;
+    }
+
+    // Find free timer slot
+    int freeSlot = -1;
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        if (!timers[i].active) {
+            freeSlot = i;
+            break;
+        }
+    }
+
+    if (freeSlot < 0) {
+        sendJsonResponse("{\"err\":\"no_free_timer\"}");
+        return;
+    }
+
+    // Set up timer
+    timers[freeSlot].active = true;
+    timers[freeSlot].portType = portType;
+    timers[freeSlot].portIndex = portIndex;
+    timers[freeSlot].action = action;
+    timers[freeSlot].setValue = doc["value"] | 0;
+    timers[freeSlot].triggerTime = millis() + (unsigned long)minutes * 60000UL;
+
+    // Return timer ID (slot + 1 to avoid ID 0)
+    JsonDocument resp;
+    resp["ok"] = true;
+    resp["id"] = freeSlot + 1;
+
+    char json[64];
+    serializeJson(resp, json, sizeof(json));
+    sendJsonResponse(json);
+}
+
+void handleCmdTimerList(JsonDocument& doc) {
+    JsonDocument resp;
+    JsonArray timerList = resp["timers"].to<JsonArray>();
+
+    unsigned long now = millis();
+
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        if (!timers[i].active) continue;
+
+        JsonObject t = timerList.add<JsonObject>();
+        t["id"] = i + 1;
+
+        // Format port name
+        char portName[10];
+        if (timers[i].portType == 0) {
+            if (timers[i].portIndex < 5) {
+                sprintf(portName, "dc%d", timers[i].portIndex + 1);
+            } else if (timers[i].portIndex == 5) {
+                strcpy(portName, "usb12");
+            } else {
+                strcpy(portName, "usb345");
+            }
+        } else {
+            sprintf(portName, "pwm%d", timers[i].portIndex == 0 ? 13 : (timers[i].portIndex == 1 ? 14 : 15));
+        }
+        t["port"] = portName;
+
+        // Action
+        const char* actionNames[] = {"off", "on", "set"};
+        t["action"] = actionNames[timers[i].action];
+
+        if (timers[i].action == TIMER_SET) {
+            t["value"] = timers[i].setValue;
+        }
+
+        // Remaining time in seconds
+        unsigned long remaining = 0;
+        if (timers[i].triggerTime > now) {
+            remaining = (timers[i].triggerTime - now) / 1000;
+        }
+        t["remaining"] = remaining;
+    }
+
+    char json[512];
+    serializeJson(resp, json, sizeof(json));
+    sendJsonResponse(json);
+}
+
+void handleCmdTimerCancel(JsonDocument& doc) {
+    int id = doc["id"] | -1;
+    if (id < 1 || id > MAX_TIMERS) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"id\"}");
+        return;
+    }
+
+    int slot = id - 1;
+    if (!timers[slot].active) {
+        sendJsonResponse("{\"err\":\"timer_not_found\"}");
+        return;
+    }
+
+    timers[slot].active = false;
+    sendJsonResponse("{\"ok\":true}");
+}
+
+// ============================================================================
+// PHASE 3: TEMPERATURE RATE FUNCTIONS
+// ============================================================================
+
+void updateTempHistory() {
+    if (ambientTemp < -50) return;  // Invalid reading
+
+    tempHistory.temps[tempHistory.index] = ambientTemp;
+    tempHistory.times[tempHistory.index] = millis();
+
+    tempHistory.index = (tempHistory.index + 1) % TEMP_HISTORY_SIZE;
+    if (tempHistory.count < TEMP_HISTORY_SIZE) {
+        tempHistory.count++;
+    }
+}
+
+float calculateTempRate() {
+    if (tempHistory.count < 2) return 0.0;
+
+    // Find oldest and newest samples
+    int oldest = (tempHistory.index - tempHistory.count + TEMP_HISTORY_SIZE) % TEMP_HISTORY_SIZE;
+    int newest = (tempHistory.index - 1 + TEMP_HISTORY_SIZE) % TEMP_HISTORY_SIZE;
+
+    float tempDiff = tempHistory.temps[newest] - tempHistory.temps[oldest];
+    unsigned long timeDiff = tempHistory.times[newest] - tempHistory.times[oldest];
+
+    if (timeDiff == 0) return 0.0;
+
+    // Calculate rate in °C per hour
+    float ratePerMs = tempDiff / (float)timeDiff;
+    float ratePerHour = ratePerMs * 3600000.0;  // ms to hours
+
+    return ratePerHour;
+}
+
+void handleCmdTempRate(JsonDocument& doc) {
+    JsonDocument resp;
+
+    resp["rate"] = roundf(calculateTempRate() * 100) / 100;
+    resp["period"] = tempHistory.count > 0 ? tempHistory.count * 60 : 0;  // seconds
+    resp["samples"] = tempHistory.count;
+
+    char json[96];
+    serializeJson(resp, json, sizeof(json));
+    sendJsonResponse(json);
+}
+
+// ============================================================================
+// PHASE 3: DEW PID TUNING
+// ============================================================================
+
+void handleCmdDewPid(JsonDocument& doc) {
+    int ch = doc["ch"] | -1;
+    if (ch != 14 && ch != 15) {
+        sendJsonResponse("{\"err\":\"invalid_param\",\"param\":\"ch\"}");
+        return;
+    }
+
+    int idx = ch - 14;  // 0 or 1
+
+    // Check if setting or getting
+    bool setting = doc.containsKey("kp") || doc.containsKey("ki") ||
+                   doc.containsKey("kd") || doc.containsKey("i_max");
+
+    if (setting) {
+        if (doc.containsKey("kp")) {
+            dewConfig[idx].kp = doc["kp"];
+        }
+        if (doc.containsKey("ki")) {
+            dewConfig[idx].ki = doc["ki"];
+        }
+        if (doc.containsKey("kd")) {
+            dewConfig[idx].kd = doc["kd"];
+        }
+        if (doc.containsKey("i_max")) {
+            dewConfig[idx].i_max = doc["i_max"];
+        }
+
+        // Reset PID state
+        dewConfig[idx].integral = 0;
+        dewConfig[idx].lastError = 0;
+
+        saveDewConfig();
+        sendJsonResponse("{\"ok\":true}");
+    } else {
+        // Return current PID settings
+        JsonDocument resp;
+        resp["kp"] = dewConfig[idx].kp;
+        resp["ki"] = dewConfig[idx].ki;
+        resp["kd"] = dewConfig[idx].kd;
+        resp["i_max"] = dewConfig[idx].i_max;
+
+        char json[128];
+        serializeJson(resp, json, sizeof(json));
+        sendJsonResponse(json);
     }
 }

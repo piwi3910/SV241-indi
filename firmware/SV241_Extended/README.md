@@ -1,6 +1,6 @@
-# SV241 Extended Firmware v2.0
+# SV241 Extended Firmware v2.1
 
-Advanced firmware for the SVBONY SV241 Power Box with auto dew control, session statistics, voltage alerts, sensor calibration, and custom port naming.
+Advanced firmware for the SVBONY SV241 Power Box with auto dew control, session statistics, voltage alerts, sensor calibration, custom port naming, configuration profiles, timer scheduling, temperature rate tracking, and PID tuning.
 
 ## Overview
 
@@ -121,6 +121,90 @@ Monitor system health and troubleshoot issues.
 - Free heap memory (ESP32)
 - I2C error count
 
+### 7. Configuration Profiles (NEW in v2.1)
+
+Save and restore complete device configurations instantly.
+
+**Features:**
+- Up to 4 profile slots
+- Stores all DC/USB states and PWM values
+- Named profiles (e.g., "Widefield", "Planetary", "Visual")
+- EEPROM persistence across power cycles
+
+**Saved State:**
+- DC1-DC5, USB12, USB345 on/off states
+- PWM13, PWM14, PWM15 values
+- Auto-dew enable/disable state
+- Dew margins
+
+**Usage via INDI:**
+- Save current state to any slot with a custom name
+- Load a profile to restore all settings instantly
+- Delete profiles you no longer need
+- View active profile indicator
+
+### 8. Timer Scheduling (NEW in v2.1)
+
+Schedule port actions to occur automatically in the future.
+
+**Features:**
+- Up to 8 concurrent timers
+- Actions: On, Off, or Set (to specific PWM value)
+- Per-port scheduling (DC1-DC5, USB12, USB345, PWM13-PWM15)
+- Countdown display in INDI driver
+
+**Typical Usage:**
+```
+"Turn off DC3 in 30 minutes" (auto-shutdown camera cooler)
+"Set PWM14 to 200 in 60 minutes" (pre-heat dew heater before sunset)
+"Turn on DC1 in 5 minutes" (delayed mount power-up)
+```
+
+**Timer Management:**
+- Create timers with port, action, and minutes
+- View all active timers with remaining time
+- Cancel individual timers as needed
+
+### 9. Temperature Rate Tracking (NEW in v2.1)
+
+Monitor how fast temperature is changing.
+
+**Features:**
+- Rolling 30-minute temperature history
+- Rate of change in °C/hour
+- Helps predict dew formation timing
+
+**How it works:**
+1. Firmware samples temperature every minute
+2. Maintains 30-sample circular buffer
+3. Calculates rate from oldest to newest sample
+4. Positive = warming, Negative = cooling
+
+**Typical Usage:**
+- Rate of -3°C/hour indicates rapid cooling
+- Combined with dew point proximity, helps anticipate dew issues
+- Plan dew heater activation before problems occur
+
+### 10. PID Tuning (NEW in v2.1)
+
+Fine-tune the auto dew heater PID controller for your equipment.
+
+**Default Values:**
+- Kp = 2.0 (proportional gain)
+- Ki = 0.5 (integral gain)
+- Kd = 0.1 (derivative gain)
+
+**Per-Channel Tuning:**
+- PWM14 and PWM15 have independent PID coefficients
+- Adjust for different heater characteristics
+- Stored in EEPROM
+
+**Tuning Tips:**
+- Increase Kp for faster response, but may overshoot
+- Increase Ki to eliminate steady-state error
+- Increase Kd to reduce oscillation
+- Start with defaults; adjust only if needed
+
 ## Quick Start
 
 ### Flash the Firmware
@@ -164,8 +248,16 @@ TEST SUMMARY
   Ext Stats Reset: PASS
   Ext Names Get: PASS
   Ext Names Set: PASS
+  Ext Profile List: PASS
+  Ext Profile Save: PASS
+  Ext Profile Load: PASS
+  Ext Profile Delete: PASS
+  Ext Timer Set: PASS
+  Ext Timer List: PASS
+  Ext Timer Cancel: PASS
+  Ext Temp Rate: PASS
 
-Total: 16/16 passed
+Total: 24/24 passed
 ```
 
 ## Protocol Reference
@@ -329,6 +421,92 @@ Request:  {"cmd":"i2c_recovery"}
 Response: {"ok":true,"sda_released":true}
 ```
 
+#### Profiles (NEW in v2.1)
+
+**profile_list** - Get all saved profiles
+```json
+Request:  {"cmd":"profile_list"}
+Response: {
+  "profiles": [
+    {"slot": 0, "name": "Widefield", "active": true},
+    {"slot": 1, "name": "Planetary", "active": false},
+    {"slot": 2, "name": "", "active": false},
+    {"slot": 3, "name": "", "active": false}
+  ]
+}
+```
+
+**profile_save** - Save current state to a profile slot
+```json
+Request:  {"cmd":"profile_save","slot":0,"name":"Widefield"}
+Response: {"ok":true}
+```
+
+**profile_load** - Load a saved profile
+```json
+Request:  {"cmd":"profile_load","slot":0}
+Response: {"ok":true}
+```
+
+**profile_delete** - Delete a profile
+```json
+Request:  {"cmd":"profile_delete","slot":0}
+Response: {"ok":true}
+```
+
+#### Timers (NEW in v2.1)
+
+**timer_list** - Get all active timers
+```json
+Request:  {"cmd":"timer_list"}
+Response: {
+  "timers": [
+    {"id": 1, "port": "DC3", "action": "off", "remaining": 1500},
+    {"id": 2, "port": "PWM14", "action": "set", "value": 200, "remaining": 3200}
+  ]
+}
+```
+
+**timer_set** - Create a new timer
+```json
+Request:  {"cmd":"timer_set","port":"DC3","action":"off","minutes":30}
+Response: {"ok":true,"id":1}
+```
+
+```json
+Request:  {"cmd":"timer_set","port":"PWM14","action":"set","minutes":60,"value":200}
+Response: {"ok":true,"id":2}
+```
+
+**timer_cancel** - Cancel a timer by ID
+```json
+Request:  {"cmd":"timer_cancel","id":1}
+Response: {"ok":true}
+```
+
+#### Temperature Rate (NEW in v2.1)
+
+**temp_rate** - Get temperature rate of change
+```json
+Request:  {"cmd":"temp_rate"}
+Response: {"rate": -2.5, "samples": 30}
+```
+
+Note: Rate is in °C/hour. Negative values indicate cooling.
+
+#### PID Tuning (NEW in v2.1)
+
+**dew_pid** - Get or set PID coefficients for dew heaters
+```json
+Request:  {"cmd":"dew_pid","ch":14}
+Response: {"ch":14,"kp":2.0,"ki":0.5,"kd":0.1}
+```
+
+```json
+Request:  {"cmd":"dew_pid","ch":14,"kp":2.5,"ki":0.6,"kd":0.15}
+Response: {"ok":true}
+```
+
 ## EEPROM Storage
 
 Configuration is stored in EEPROM and persists across power cycles:
@@ -340,6 +518,8 @@ Configuration is stored in EEPROM and persists across power cycles:
 | 0x20 | Dew configuration (2 channels) |
 | 0x60 | Alert configuration |
 | 0x80 | Port names (10 x 16 bytes) |
+| 0x118 | Profiles (4 x ~64 bytes) |
+| 0x218 | PID coefficients (2 channels x 3 floats) |
 
 ## Building from Source
 
@@ -441,9 +621,36 @@ Where:
 3. Ensure auto mode is enabled for the channel
 4. Verify margin is set appropriately (default 5°C)
 
+### Profiles not loading correctly
+
+1. Verify the profile was saved with a name
+2. Check that EEPROM write succeeded (no errors in response)
+3. Power cycle and try loading again
+4. If issues persist, delete and re-save the profile
+
+### Timers not executing
+
+1. Check timer shows in timer_list with correct remaining time
+2. Verify the port name matches exactly (case-sensitive)
+3. Confirm action type is valid (on, off, set)
+4. Note: Timers are not persistent - lost on power cycle
+
+### Temperature rate shows 0
+
+1. Rate calculation needs at least 2 samples (wait 2 minutes)
+2. Full accuracy requires 30 samples (30 minutes of operation)
+3. Verify temperature sensor is working in diagnostics
+
 ## Version History
 
-### v2.0.0 (Current)
+### v2.1.0 (Current)
+- Configuration profiles (4 slots) - save/load complete device setups
+- Timer scheduling (8 concurrent) - schedule future port actions
+- Temperature rate tracking - monitor cooling/heating trends
+- PID tuning - adjustable coefficients per dew heater channel
+- All v2.0.0 features included
+
+### v2.0.0
 - Auto dew heater control with PID
 - Session statistics tracking
 - Voltage alerts with auto-shutdown
@@ -468,3 +675,7 @@ Issues and improvements welcome! Please test thoroughly, especially:
 - EEPROM persistence
 - Long-duration auto-dew operation
 - Edge cases in alert handling
+- Profile save/load cycles
+- Timer scheduling accuracy
+- Temperature rate calculation over extended sessions
+- PID tuning effectiveness with different heater types

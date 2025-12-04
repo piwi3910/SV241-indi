@@ -548,11 +548,272 @@ def test_extended_names_set(ser):
         return False
 
 
+# ============================================================================
+# PHASE 3 TESTS
+# ============================================================================
+
+def test_extended_profile_list(ser):
+    """Test profile_list command."""
+    print("\n=== Testing Extended: profile_list ===\n")
+
+    resp = send_json_command(ser, {"cmd": "profile_list"})
+    if resp and "profiles" in resp:
+        profiles = resp.get('profiles', [])
+        active = resp.get('active', -1)
+        print(f"  Profiles found: {len(profiles)}")
+        for p in profiles:
+            print(f"    Slot {p.get('slot')}: {p.get('name')}")
+        print(f"  Active profile: {active}")
+        return True
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
+def test_extended_profile_save_load(ser):
+    """Test profile_save and profile_load commands."""
+    print("\n=== Testing Extended: profile_save/load ===\n")
+
+    # First, set a known state: DC1 ON, PWM14 to 100
+    send_json_command(ser, {"cmd": "status"})  # Just to sync
+    send_binary_command(ser, 0x01, param1=0, param2=1, wait_ms=100)  # DC1 ON
+    send_binary_command(ser, 0x01, param1=8, param2=100, wait_ms=100)  # PWM14=100
+
+    # Save current state as profile
+    resp = send_json_command(ser, {"cmd": "profile_save", "slot": 0, "name": "TestProfile"})
+    if not resp or not resp.get("ok"):
+        print(f"  profile_save FAILED: {resp}")
+        return False
+    print("  Saved profile to slot 0: OK")
+
+    # Change state: DC1 OFF, PWM14 to 0
+    send_binary_command(ser, 0x01, param1=0, param2=0, wait_ms=100)  # DC1 OFF
+    send_binary_command(ser, 0x01, param1=8, param2=0, wait_ms=100)  # PWM14=0
+
+    # Load the profile back
+    resp = send_json_command(ser, {"cmd": "profile_load", "slot": 0})
+    if not resp or not resp.get("ok"):
+        print(f"  profile_load FAILED: {resp}")
+        return False
+    print("  Loaded profile from slot 0: OK")
+
+    # Verify state was restored
+    resp = send_binary_command(ser, 0x08, wait_ms=200)
+    if resp and len(resp) >= 14 and resp[0] == 0x24:
+        dc1_state = resp[3]
+        pwm14_value = resp[11]
+        if dc1_state == 1 and pwm14_value == 100:
+            print(f"  Verified: DC1={dc1_state} (expected 1), PWM14={pwm14_value} (expected 100)")
+
+            # Verify profile list shows our profile
+            resp2 = send_json_command(ser, {"cmd": "profile_list"})
+            if resp2 and "profiles" in resp2:
+                profiles = resp2.get('profiles', [])
+                found = any(p.get('name') == 'TestProfile' for p in profiles)
+                if found:
+                    print("  Profile 'TestProfile' found in list: OK")
+                    # Reset state
+                    send_binary_command(ser, 0x01, param1=0, param2=0, wait_ms=100)
+                    send_binary_command(ser, 0x01, param1=8, param2=0, wait_ms=100)
+                    return True
+                else:
+                    print("  Profile not found in list")
+            return False
+        else:
+            print(f"  Verification FAILED: DC1={dc1_state}, PWM14={pwm14_value}")
+            return False
+    else:
+        print(f"  Sync states FAILED")
+        return False
+
+
+def test_extended_profile_delete(ser):
+    """Test profile_delete command."""
+    print("\n=== Testing Extended: profile_delete ===\n")
+
+    # First save a profile to delete
+    resp = send_json_command(ser, {"cmd": "profile_save", "slot": 3, "name": "ToDelete"})
+    if not resp or not resp.get("ok"):
+        print(f"  profile_save FAILED: {resp}")
+        return False
+
+    # Delete it
+    resp = send_json_command(ser, {"cmd": "profile_delete", "slot": 3})
+    if not resp or not resp.get("ok"):
+        print(f"  profile_delete FAILED: {resp}")
+        return False
+    print("  Deleted profile from slot 3: OK")
+
+    # Verify it's gone
+    resp = send_json_command(ser, {"cmd": "profile_list"})
+    if resp and "profiles" in resp:
+        profiles = resp.get('profiles', [])
+        found = any(p.get('slot') == 3 for p in profiles)
+        if not found:
+            print("  Verified: slot 3 no longer in profile list")
+            return True
+        else:
+            print("  FAILED: slot 3 still in list")
+            return False
+    return False
+
+
+def test_extended_timer_set(ser):
+    """Test timer_set command."""
+    print("\n=== Testing Extended: timer_set ===\n")
+
+    # Set a timer for 1 minute from now (we won't wait for it, just test the API)
+    resp = send_json_command(ser, {
+        "cmd": "timer_set",
+        "port": "dc1",
+        "action": "off",
+        "minutes": 1
+    })
+    if resp and resp.get("ok") and "id" in resp:
+        timer_id = resp.get("id")
+        print(f"  Timer set: id={timer_id}, port=dc1, action=off, minutes=1")
+        return True
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
+def test_extended_timer_list(ser):
+    """Test timer_list command."""
+    print("\n=== Testing Extended: timer_list ===\n")
+
+    # First set a timer
+    resp = send_json_command(ser, {
+        "cmd": "timer_set",
+        "port": "pwm14",
+        "action": "set",
+        "value": 127,
+        "minutes": 2
+    })
+
+    # List timers
+    resp = send_json_command(ser, {"cmd": "timer_list"})
+    if resp and "timers" in resp:
+        timers = resp.get('timers', [])
+        print(f"  Active timers: {len(timers)}")
+        for t in timers:
+            print(f"    ID {t.get('id')}: {t.get('port')} -> {t.get('action')}, "
+                  f"remaining={t.get('remaining')}s")
+        return True
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
+def test_extended_timer_cancel(ser):
+    """Test timer_cancel command."""
+    print("\n=== Testing Extended: timer_cancel ===\n")
+
+    # Set a timer
+    resp = send_json_command(ser, {
+        "cmd": "timer_set",
+        "port": "dc2",
+        "action": "on",
+        "minutes": 5
+    })
+    if not resp or not resp.get("ok"):
+        print(f"  timer_set FAILED: {resp}")
+        return False
+
+    timer_id = resp.get("id")
+    print(f"  Created timer ID {timer_id}")
+
+    # Cancel it
+    resp = send_json_command(ser, {"cmd": "timer_cancel", "id": timer_id})
+    if resp and resp.get("ok"):
+        print(f"  Cancelled timer {timer_id}: OK")
+
+        # Verify it's gone
+        resp = send_json_command(ser, {"cmd": "timer_list"})
+        if resp and "timers" in resp:
+            timers = resp.get('timers', [])
+            found = any(t.get('id') == timer_id for t in timers)
+            if not found:
+                print(f"  Verified: timer {timer_id} no longer in list")
+                return True
+            else:
+                print(f"  FAILED: timer still in list")
+                return False
+        return False
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
+def test_extended_temp_rate(ser):
+    """Test temp_rate command."""
+    print("\n=== Testing Extended: temp_rate ===\n")
+
+    resp = send_json_command(ser, {"cmd": "temp_rate"})
+    if resp and "rate" in resp:
+        print(f"  Temperature rate: {resp.get('rate')} C/hour")
+        print(f"  Measurement period: {resp.get('period')} seconds")
+        print(f"  Samples collected: {resp.get('samples')}")
+        return True
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
+def test_extended_dew_pid(ser):
+    """Test dew_pid get/set command."""
+    print("\n=== Testing Extended: dew_pid ===\n")
+
+    # Get current PID settings for channel 14
+    resp = send_json_command(ser, {"cmd": "dew_pid", "ch": 14})
+    if resp and "kp" in resp:
+        print("  Channel 14 PID settings:")
+        print(f"    Kp: {resp.get('kp')}")
+        print(f"    Ki: {resp.get('ki')}")
+        print(f"    Kd: {resp.get('kd')}")
+        print(f"    i_max: {resp.get('i_max')}")
+
+        # Test setting new PID values
+        resp2 = send_json_command(ser, {
+            "cmd": "dew_pid",
+            "ch": 14,
+            "kp": 2.5,
+            "ki": 0.3,
+            "kd": 0.15
+        })
+        if resp2 and resp2.get("ok"):
+            print("  Updated PID settings: OK")
+
+            # Verify the change
+            resp3 = send_json_command(ser, {"cmd": "dew_pid", "ch": 14})
+            if resp3 and resp3.get("kp") == 2.5:
+                print(f"  Verified: Kp = {resp3.get('kp')}")
+
+                # Restore original values
+                send_json_command(ser, {
+                    "cmd": "dew_pid",
+                    "ch": 14,
+                    "kp": resp.get('kp'),
+                    "ki": resp.get('ki'),
+                    "kd": resp.get('kd')
+                })
+                return True
+            else:
+                print(f"  Verification FAILED: {resp3}")
+                return False
+        else:
+            print(f"  Setting PID FAILED: {resp2}")
+            return False
+    else:
+        print(f"  FAILED: {resp}")
+        return False
+
+
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbserial-1133440"
 
     print("=" * 70)
-    print("SV241 Extended Firmware v2.0 Test")
+    print("SV241 Extended Firmware v2.1 Test (with Phase 3)")
     print("=" * 70)
     print(f"Port: {port}")
     print("=" * 70)
@@ -568,7 +829,7 @@ def main():
             "Binary Sync States": test_binary_sync_states(ser),
             "Binary DC Outputs": test_binary_dc_outputs(ser),
             "Binary PWM Outputs": test_binary_pwm_outputs(ser),
-            # Extended JSON protocol tests
+            # Extended JSON protocol tests (Phase 1 & 2)
             "Ext Version": test_extended_version(ser),
             "Ext Status": test_extended_status(ser),
             "Ext Dew Status": test_extended_dew_status(ser),
@@ -581,6 +842,17 @@ def main():
             "Ext Stats Reset": test_extended_stats_reset(ser),
             "Ext Names Get": test_extended_names_get(ser),
             "Ext Names Set": test_extended_names_set(ser),
+            # Phase 3: Profiles
+            "Ext Profile List": test_extended_profile_list(ser),
+            "Ext Profile Save/Load": test_extended_profile_save_load(ser),
+            "Ext Profile Delete": test_extended_profile_delete(ser),
+            # Phase 3: Timers
+            "Ext Timer Set": test_extended_timer_set(ser),
+            "Ext Timer List": test_extended_timer_list(ser),
+            "Ext Timer Cancel": test_extended_timer_cancel(ser),
+            # Phase 3: Temperature Rate & PID
+            "Ext Temp Rate": test_extended_temp_rate(ser),
+            "Ext Dew PID": test_extended_dew_pid(ser),
         }
 
         ser.close()

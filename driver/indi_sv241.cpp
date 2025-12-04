@@ -285,6 +285,82 @@ bool SV241::initProperties()
     PortNamesTP[9].fill("PORT_PWM15", "PWM15", "PWM15");
     PortNamesTP.fill(getDeviceName(), "PORT_NAMES", "Port Names", "Port Labels", IP_RW, 60, IPS_IDLE);
 
+    // Phase 3: Profiles
+    ProfilesTP[0].fill("PROFILE_0", "Slot 0", "(empty)");
+    ProfilesTP[1].fill("PROFILE_1", "Slot 1", "(empty)");
+    ProfilesTP[2].fill("PROFILE_2", "Slot 2", "(empty)");
+    ProfilesTP[3].fill("PROFILE_3", "Slot 3", "(empty)");
+    ProfilesTP.fill(getDeviceName(), "PROFILES", "Saved Profiles", "Profiles", IP_RO, 60, IPS_IDLE);
+
+    ProfileLoadSP[0].fill("LOAD_0", "Load 0", ISS_OFF);
+    ProfileLoadSP[1].fill("LOAD_1", "Load 1", ISS_OFF);
+    ProfileLoadSP[2].fill("LOAD_2", "Load 2", ISS_OFF);
+    ProfileLoadSP[3].fill("LOAD_3", "Load 3", ISS_OFF);
+    ProfileLoadSP.fill(getDeviceName(), "PROFILE_LOAD", "Load Profile", "Profiles", IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    ProfileSaveSP[0].fill("SAVE_0", "Save to 0", ISS_OFF);
+    ProfileSaveSP[1].fill("SAVE_1", "Save to 1", ISS_OFF);
+    ProfileSaveSP[2].fill("SAVE_2", "Save to 2", ISS_OFF);
+    ProfileSaveSP[3].fill("SAVE_3", "Save to 3", ISS_OFF);
+    ProfileSaveSP.fill(getDeviceName(), "PROFILE_SAVE", "Save Profile", "Profiles", IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    ProfileDeleteSP[0].fill("DELETE_0", "Delete 0", ISS_OFF);
+    ProfileDeleteSP[1].fill("DELETE_1", "Delete 1", ISS_OFF);
+    ProfileDeleteSP[2].fill("DELETE_2", "Delete 2", ISS_OFF);
+    ProfileDeleteSP[3].fill("DELETE_3", "Delete 3", ISS_OFF);
+    ProfileDeleteSP.fill(getDeviceName(), "PROFILE_DELETE", "Delete Profile", "Profiles", IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    ProfileNameTP[0].fill("PROFILE_NAME", "Profile Name", "New Profile");
+    ProfileNameTP.fill(getDeviceName(), "PROFILE_NAME_INPUT", "Save As", "Profiles", IP_RW, 60, IPS_IDLE);
+
+    ActiveProfileNP[0].fill("ACTIVE_PROFILE", "Active", "%.0f", -1, 3, 1, -1);
+    ActiveProfileNP.fill(getDeviceName(), "ACTIVE_PROFILE", "Active Profile", "Profiles", IP_RO, 60, IPS_IDLE);
+
+    // Phase 3: Timers
+    TimerStatusTP[0].fill("TIMER_0", "Timer 1", "");
+    TimerStatusTP[1].fill("TIMER_1", "Timer 2", "");
+    TimerStatusTP[2].fill("TIMER_2", "Timer 3", "");
+    TimerStatusTP[3].fill("TIMER_3", "Timer 4", "");
+    TimerStatusTP.fill(getDeviceName(), "TIMER_STATUS", "Active Timers", "Timers", IP_RO, 60, IPS_IDLE);
+
+    TimerPortTP[0].fill("TIMER_PORT", "Port", "dc1");
+    TimerPortTP.fill(getDeviceName(), "TIMER_PORT_INPUT", "Port", "Timers", IP_RW, 60, IPS_IDLE);
+
+    TimerActionSP[0].fill("ACTION_ON", "On", ISS_ON);
+    TimerActionSP[1].fill("ACTION_OFF", "Off", ISS_OFF);
+    TimerActionSP[2].fill("ACTION_SET", "Set PWM", ISS_OFF);
+    TimerActionSP.fill(getDeviceName(), "TIMER_ACTION", "Action", "Timers", IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    TimerMinutesNP[0].fill("TIMER_MINUTES", "Minutes", "%.0f", 1, 1440, 1, 60);
+    TimerMinutesNP.fill(getDeviceName(), "TIMER_MINUTES", "Delay", "Timers", IP_RW, 60, IPS_IDLE);
+
+    TimerValueNP[0].fill("TIMER_VALUE", "PWM Value", "%.0f", 0, 253, 1, 0);
+    TimerValueNP.fill(getDeviceName(), "TIMER_VALUE", "PWM Value", "Timers", IP_RW, 60, IPS_IDLE);
+
+    TimerSetSP[0].fill("TIMER_CREATE", "Create Timer", ISS_OFF);
+    TimerSetSP.fill(getDeviceName(), "TIMER_SET", "Create", "Timers", IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    TimerCancelSP[0].fill("CANCEL_0", "Cancel 1", ISS_OFF);
+    TimerCancelSP[1].fill("CANCEL_1", "Cancel 2", ISS_OFF);
+    TimerCancelSP[2].fill("CANCEL_2", "Cancel 3", ISS_OFF);
+    TimerCancelSP[3].fill("CANCEL_3", "Cancel 4", ISS_OFF);
+    TimerCancelSP.fill(getDeviceName(), "TIMER_CANCEL", "Cancel Timer", "Timers", IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+    // Phase 3: Temperature rate
+    TempRateNP[0].fill("TEMP_RATE", "Rate (C/hour)", "%.2f", -10, 10, 0.1, 0);
+    TempRateNP.fill(getDeviceName(), "TEMP_RATE", "Temp Change Rate", "Sensors", IP_RO, 60, IPS_IDLE);
+
+    // Phase 3: PID tuning
+    PID14NP[0].fill("PID14_KP", "Kp", "%.2f", 0, 10, 0.1, 2.0);
+    PID14NP[1].fill("PID14_KI", "Ki", "%.2f", 0, 5, 0.05, 0.5);
+    PID14NP[2].fill("PID14_KD", "Kd", "%.2f", 0, 2, 0.01, 0.1);
+    PID14NP.fill(getDeviceName(), "PID_CH14", "PID CH14", "Dew Control", IP_RW, 60, IPS_IDLE);
+
+    PID15NP[0].fill("PID15_KP", "Kp", "%.2f", 0, 10, 0.1, 2.0);
+    PID15NP[1].fill("PID15_KI", "Ki", "%.2f", 0, 5, 0.05, 0.5);
+    PID15NP[2].fill("PID15_KD", "Kd", "%.2f", 0, 2, 0.01, 0.1);
+    PID15NP.fill(getDeviceName(), "PID_CH15", "PID CH15", "Dew Control", IP_RW, 60, IPS_IDLE);
+
     // Set driver info
     addAuxControls();
 
@@ -366,6 +442,30 @@ bool SV241::updateProperties()
             // Port names
             defineProperty(PortNamesTP);
 
+            // Phase 3: Profiles
+            defineProperty(ProfilesTP);
+            defineProperty(ProfileLoadSP);
+            defineProperty(ProfileSaveSP);
+            defineProperty(ProfileDeleteSP);
+            defineProperty(ProfileNameTP);
+            defineProperty(ActiveProfileNP);
+
+            // Phase 3: Timers
+            defineProperty(TimerStatusTP);
+            defineProperty(TimerPortTP);
+            defineProperty(TimerActionSP);
+            defineProperty(TimerMinutesNP);
+            defineProperty(TimerValueNP);
+            defineProperty(TimerSetSP);
+            defineProperty(TimerCancelSP);
+
+            // Phase 3: Temperature rate
+            defineProperty(TempRateNP);
+
+            // Phase 3: PID tuning
+            defineProperty(PID14NP);
+            defineProperty(PID15NP);
+
             // Get initial extended status
             extGetStatus();
             extGetDewStatus();
@@ -375,6 +475,13 @@ bool SV241::updateProperties()
             extGetCalibration();
             extGetAlertConfig();
             extGetNames();
+
+            // Phase 3: Get initial profile, timer, temp rate, and PID status
+            extGetProfiles();
+            extGetTimers();
+            extGetTempRate();
+            extGetDewPid(14);
+            extGetDewPid(15);
         }
         else
         {
@@ -428,6 +535,30 @@ bool SV241::updateProperties()
             deleteProperty(AlertAutoOffSP);
             deleteProperty(StatsResetSP);
             deleteProperty(PortNamesTP);
+
+            // Phase 3: Profiles
+            deleteProperty(ProfilesTP);
+            deleteProperty(ProfileLoadSP);
+            deleteProperty(ProfileSaveSP);
+            deleteProperty(ProfileDeleteSP);
+            deleteProperty(ProfileNameTP);
+            deleteProperty(ActiveProfileNP);
+
+            // Phase 3: Timers
+            deleteProperty(TimerStatusTP);
+            deleteProperty(TimerPortTP);
+            deleteProperty(TimerActionSP);
+            deleteProperty(TimerMinutesNP);
+            deleteProperty(TimerValueNP);
+            deleteProperty(TimerSetSP);
+            deleteProperty(TimerCancelSP);
+
+            // Phase 3: Temperature rate
+            deleteProperty(TempRateNP);
+
+            // Phase 3: PID tuning
+            deleteProperty(PID14NP);
+            deleteProperty(PID15NP);
         }
 
         hasExtendedFirmware = false;
@@ -1451,6 +1582,368 @@ bool SV241::extSetName(int idx, const std::string &name)
     return ok;
 }
 
+// ============================================================================
+// Phase 3: Profiles Implementation
+// ============================================================================
+
+bool SV241::extGetProfiles()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"profile_list\"}", response))
+        return false;
+
+    // Parse profiles array
+    std::vector<std::string> profiles = getJsonStringArray(response, "profiles");
+    for (size_t i = 0; i < profiles.size() && i < 4; i++)
+    {
+        profileNames[i] = profiles[i];
+        ProfilesTP[i].setText(profiles[i].empty() ? "(empty)" : profiles[i].c_str());
+    }
+
+    // Fill remaining slots
+    for (size_t i = profiles.size(); i < 4; i++)
+    {
+        profileNames[i] = "";
+        ProfilesTP[i].setText("(empty)");
+    }
+
+    activeProfile = getJsonInt(response, "active", -1);
+    ActiveProfileNP[0].setValue(activeProfile);
+    ActiveProfileNP.setState(IPS_OK);
+    ActiveProfileNP.apply();
+
+    ProfilesTP.setState(IPS_OK);
+    ProfilesTP.apply();
+
+    LOG_INFO("Profile list updated");
+    return true;
+}
+
+bool SV241::extSaveProfile(int slot, const std::string &name)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    if (slot < 0 || slot > 3)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"profile_save\",\"slot\":" << slot << ",\"name\":\"" << name << "\"}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        profileNames[slot] = name;
+        LOGF_INFO("Profile saved to slot %d: '%s'", slot, name.c_str());
+        extGetProfiles();  // Refresh profile list
+    }
+
+    return ok;
+}
+
+bool SV241::extLoadProfile(int slot)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    if (slot < 0 || slot > 3)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"profile_load\",\"slot\":" << slot << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        activeProfile = slot;
+        LOGF_INFO("Profile %d loaded: '%s'", slot, profileNames[slot].c_str());
+
+        // Refresh device state after loading profile
+        syncAllStates();
+        extGetDewStatus();
+    }
+
+    return ok;
+}
+
+bool SV241::extDeleteProfile(int slot)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    if (slot < 0 || slot > 3)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"profile_delete\",\"slot\":" << slot << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        LOGF_INFO("Profile %d deleted", slot);
+        extGetProfiles();  // Refresh profile list
+    }
+
+    return ok;
+}
+
+// ============================================================================
+// Phase 3: Timers Implementation
+// ============================================================================
+
+bool SV241::extGetTimers()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"timer_list\"}", response))
+        return false;
+
+    // Clear existing timers
+    activeTimers.clear();
+
+    // Parse timers array - simple parsing for this structure
+    // Response format: {"timers":[{"id":1,"port":"dc3","action":"off","remaining":165},...]
+    size_t pos = response.find("\"timers\":[");
+    if (pos != std::string::npos)
+    {
+        pos += 10;  // Skip "timers":[
+        while (pos < response.length())
+        {
+            size_t objStart = response.find("{", pos);
+            if (objStart == std::string::npos) break;
+
+            size_t objEnd = response.find("}", objStart);
+            if (objEnd == std::string::npos) break;
+
+            std::string timerObj = response.substr(objStart, objEnd - objStart + 1);
+
+            TimerInfo timer;
+            timer.id = getJsonInt(timerObj, "id");
+            timer.port = getJsonString(timerObj, "port");
+            timer.action = getJsonString(timerObj, "action");
+            timer.remaining = getJsonInt(timerObj, "remaining");
+
+            if (timer.id > 0)
+            {
+                activeTimers.push_back(timer);
+            }
+
+            pos = objEnd + 1;
+        }
+    }
+
+    // Update timer status display (up to 4 timers shown)
+    for (int i = 0; i < 4; i++)
+    {
+        if (i < static_cast<int>(activeTimers.size()))
+        {
+            std::ostringstream status;
+            status << "#" << activeTimers[i].id << " " << activeTimers[i].port
+                   << " " << activeTimers[i].action
+                   << " in " << activeTimers[i].remaining << "s";
+            TimerStatusTP[i].setText(status.str().c_str());
+        }
+        else
+        {
+            TimerStatusTP[i].setText("");
+        }
+    }
+    TimerStatusTP.setState(activeTimers.empty() ? IPS_IDLE : IPS_OK);
+    TimerStatusTP.apply();
+
+    // Update cancel buttons - enable only for active timers
+    for (int i = 0; i < 4; i++)
+    {
+        TimerCancelSP[i].setState(ISS_OFF);
+    }
+    TimerCancelSP.setState(activeTimers.empty() ? IPS_IDLE : IPS_OK);
+    TimerCancelSP.apply();
+
+    return true;
+}
+
+bool SV241::extSetTimer(const std::string &port, const std::string &action, int minutes, int value)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"timer_set\",\"port\":\"" << port
+        << "\",\"action\":\"" << action
+        << "\",\"minutes\":" << minutes;
+
+    if (action == "set")
+    {
+        cmd << ",\"value\":" << value;
+    }
+    cmd << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        int id = getJsonInt(response, "id");
+        LOGF_INFO("Timer #%d created: %s %s in %d minutes", id, port.c_str(), action.c_str(), minutes);
+        extGetTimers();  // Refresh timer list
+    }
+
+    return ok;
+}
+
+bool SV241::extCancelTimer(int id)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"timer_cancel\",\"id\":" << id << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        LOGF_INFO("Timer #%d cancelled", id);
+        extGetTimers();  // Refresh timer list
+    }
+
+    return ok;
+}
+
+// ============================================================================
+// Phase 3: Temperature Rate Implementation
+// ============================================================================
+
+bool SV241::extGetTempRate()
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    std::string response;
+    if (!sendExtendedCommand("{\"cmd\":\"temp_rate\"}", response))
+        return false;
+
+    tempRate = getJsonDouble(response, "rate");
+
+    TempRateNP[0].setValue(tempRate);
+    TempRateNP.setState(IPS_OK);
+    TempRateNP.apply();
+
+    LOGF_DEBUG("Temperature rate: %.2f C/hour", tempRate);
+    return true;
+}
+
+// ============================================================================
+// Phase 3: PID Tuning Implementation
+// ============================================================================
+
+bool SV241::extGetDewPid(int channel)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    if (channel != 14 && channel != 15)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"dew_pid\",\"ch\":" << channel << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    double kp = getJsonDouble(response, "kp", 2.0);
+    double ki = getJsonDouble(response, "ki", 0.5);
+    double kd = getJsonDouble(response, "kd", 0.1);
+
+    if (channel == 14)
+    {
+        pid14Kp = kp;
+        pid14Ki = ki;
+        pid14Kd = kd;
+        PID14NP[0].setValue(kp);
+        PID14NP[1].setValue(ki);
+        PID14NP[2].setValue(kd);
+        PID14NP.setState(IPS_OK);
+        PID14NP.apply();
+    }
+    else
+    {
+        pid15Kp = kp;
+        pid15Ki = ki;
+        pid15Kd = kd;
+        PID15NP[0].setValue(kp);
+        PID15NP[1].setValue(ki);
+        PID15NP[2].setValue(kd);
+        PID15NP.setState(IPS_OK);
+        PID15NP.apply();
+    }
+
+    LOGF_DEBUG("PID CH%d: Kp=%.2f Ki=%.2f Kd=%.2f", channel, kp, ki, kd);
+    return true;
+}
+
+bool SV241::extSetDewPid(int channel, double kp, double ki, double kd)
+{
+    if (!hasExtendedFirmware)
+        return false;
+
+    if (channel != 14 && channel != 15)
+        return false;
+
+    std::ostringstream cmd;
+    cmd << "{\"cmd\":\"dew_pid\",\"ch\":" << channel
+        << ",\"kp\":" << kp
+        << ",\"ki\":" << ki
+        << ",\"kd\":" << kd << "}";
+
+    std::string response;
+    if (!sendExtendedCommand(cmd.str(), response))
+        return false;
+
+    bool ok = getJsonBool(response, "ok");
+    if (ok)
+    {
+        if (channel == 14)
+        {
+            pid14Kp = kp;
+            pid14Ki = ki;
+            pid14Kd = kd;
+        }
+        else
+        {
+            pid15Kp = kp;
+            pid15Ki = ki;
+            pid15Kd = kd;
+        }
+        LOGF_INFO("PID CH%d updated: Kp=%.2f Ki=%.2f Kd=%.2f", channel, kp, ki, kd);
+    }
+
+    return ok;
+}
+
 void SV241::TimerHit()
 {
     if (!isConnected())
@@ -1465,6 +1958,10 @@ void SV241::TimerHit()
         extGetStatus();
         extGetDewStatus();
         extGetAlerts();
+
+        // Phase 3: Update timer status and temperature rate
+        extGetTimers();
+        extGetTempRate();
     }
 
     SetTimer(POLL_INTERVAL_MS);
@@ -1605,6 +2102,66 @@ bool SV241::ISNewNumber(const char *dev, const char *name, double values[], char
                     AlertConfigNP.setState(IPS_ALERT);
                 }
                 AlertConfigNP.apply();
+                return true;
+            }
+
+            // Phase 3: Timer minutes setting
+            if (TimerMinutesNP.isNameMatch(name))
+            {
+                TimerMinutesNP[0].setValue(values[0]);
+                TimerMinutesNP.setState(IPS_OK);
+                TimerMinutesNP.apply();
+                return true;
+            }
+
+            // Phase 3: Timer PWM value setting
+            if (TimerValueNP.isNameMatch(name))
+            {
+                TimerValueNP[0].setValue(values[0]);
+                TimerValueNP.setState(IPS_OK);
+                TimerValueNP.apply();
+                return true;
+            }
+
+            // Phase 3: PID tuning CH14
+            if (PID14NP.isNameMatch(name))
+            {
+                double kp = values[0];
+                double ki = values[1];
+                double kd = values[2];
+                if (extSetDewPid(14, kp, ki, kd))
+                {
+                    PID14NP[0].setValue(kp);
+                    PID14NP[1].setValue(ki);
+                    PID14NP[2].setValue(kd);
+                    PID14NP.setState(IPS_OK);
+                }
+                else
+                {
+                    PID14NP.setState(IPS_ALERT);
+                }
+                PID14NP.apply();
+                return true;
+            }
+
+            // Phase 3: PID tuning CH15
+            if (PID15NP.isNameMatch(name))
+            {
+                double kp = values[0];
+                double ki = values[1];
+                double kd = values[2];
+                if (extSetDewPid(15, kp, ki, kd))
+                {
+                    PID15NP[0].setValue(kp);
+                    PID15NP[1].setValue(ki);
+                    PID15NP[2].setValue(kd);
+                    PID15NP.setState(IPS_OK);
+                }
+                else
+                {
+                    PID15NP.setState(IPS_ALERT);
+                }
+                PID15NP.apply();
                 return true;
             }
         }
@@ -1860,6 +2417,174 @@ bool SV241::ISNewSwitch(const char *dev, const char *name, ISState *states, char
                 StatsResetSP.apply();
                 return true;
             }
+
+            // Phase 3: Profile load buttons
+            if (ProfileLoadSP.isNameMatch(name))
+            {
+                ProfileLoadSP.update(states, names, n);
+                int slot = -1;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (ProfileLoadSP[i].getState() == ISS_ON)
+                    {
+                        slot = i;
+                        break;
+                    }
+                }
+
+                if (slot >= 0 && extLoadProfile(slot))
+                {
+                    ProfileLoadSP.setState(IPS_OK);
+                }
+                else
+                {
+                    ProfileLoadSP.setState(IPS_ALERT);
+                }
+
+                // Reset all button states
+                for (int i = 0; i < 4; i++)
+                    ProfileLoadSP[i].setState(ISS_OFF);
+                ProfileLoadSP.apply();
+                return true;
+            }
+
+            // Phase 3: Profile save buttons
+            if (ProfileSaveSP.isNameMatch(name))
+            {
+                ProfileSaveSP.update(states, names, n);
+                int slot = -1;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (ProfileSaveSP[i].getState() == ISS_ON)
+                    {
+                        slot = i;
+                        break;
+                    }
+                }
+
+                if (slot >= 0)
+                {
+                    std::string profileName = ProfileNameTP[0].getText();
+                    if (extSaveProfile(slot, profileName))
+                    {
+                        ProfileSaveSP.setState(IPS_OK);
+                    }
+                    else
+                    {
+                        ProfileSaveSP.setState(IPS_ALERT);
+                    }
+                }
+
+                // Reset all button states
+                for (int i = 0; i < 4; i++)
+                    ProfileSaveSP[i].setState(ISS_OFF);
+                ProfileSaveSP.apply();
+                return true;
+            }
+
+            // Phase 3: Profile delete buttons
+            if (ProfileDeleteSP.isNameMatch(name))
+            {
+                ProfileDeleteSP.update(states, names, n);
+                int slot = -1;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (ProfileDeleteSP[i].getState() == ISS_ON)
+                    {
+                        slot = i;
+                        break;
+                    }
+                }
+
+                if (slot >= 0 && extDeleteProfile(slot))
+                {
+                    ProfileDeleteSP.setState(IPS_OK);
+                }
+                else
+                {
+                    ProfileDeleteSP.setState(IPS_ALERT);
+                }
+
+                // Reset all button states
+                for (int i = 0; i < 4; i++)
+                    ProfileDeleteSP[i].setState(ISS_OFF);
+                ProfileDeleteSP.apply();
+                return true;
+            }
+
+            // Phase 3: Timer action selection
+            if (TimerActionSP.isNameMatch(name))
+            {
+                TimerActionSP.update(states, names, n);
+                TimerActionSP.setState(IPS_OK);
+                TimerActionSP.apply();
+                return true;
+            }
+
+            // Phase 3: Timer create button
+            if (TimerSetSP.isNameMatch(name))
+            {
+                TimerSetSP.setState(IPS_BUSY);
+                TimerSetSP.apply();
+
+                // Get action type
+                std::string action = "on";
+                if (TimerActionSP[1].getState() == ISS_ON)
+                    action = "off";
+                else if (TimerActionSP[2].getState() == ISS_ON)
+                    action = "set";
+
+                std::string port = TimerPortTP[0].getText();
+                int minutes = static_cast<int>(TimerMinutesNP[0].getValue());
+                int value = static_cast<int>(TimerValueNP[0].getValue());
+
+                if (extSetTimer(port, action, minutes, value))
+                {
+                    TimerSetSP.setState(IPS_OK);
+                }
+                else
+                {
+                    TimerSetSP.setState(IPS_ALERT);
+                }
+
+                TimerSetSP[0].setState(ISS_OFF);
+                TimerSetSP.apply();
+                return true;
+            }
+
+            // Phase 3: Timer cancel buttons
+            if (TimerCancelSP.isNameMatch(name))
+            {
+                TimerCancelSP.update(states, names, n);
+                int timerIdx = -1;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (TimerCancelSP[i].getState() == ISS_ON)
+                    {
+                        timerIdx = i;
+                        break;
+                    }
+                }
+
+                if (timerIdx >= 0 && timerIdx < static_cast<int>(activeTimers.size()))
+                {
+                    int timerId = activeTimers[timerIdx].id;
+                    if (extCancelTimer(timerId))
+                    {
+                        TimerCancelSP.setState(IPS_OK);
+                    }
+                    else
+                    {
+                        TimerCancelSP.setState(IPS_ALERT);
+                    }
+                }
+
+                // Reset all button states
+                for (int i = 0; i < 4; i++)
+                    TimerCancelSP[i].setState(ISS_OFF);
+                TimerCancelSP.apply();
+                return true;
+            }
         }
     }
 
@@ -1906,6 +2631,24 @@ bool SV241::ISNewText(const char *dev, const char *name, char *texts[], char *na
 
             PortNamesTP.setState(allOk ? IPS_OK : IPS_ALERT);
             PortNamesTP.apply();
+            return true;
+        }
+
+        // Phase 3: Profile name input
+        if (hasExtendedFirmware && ProfileNameTP.isNameMatch(name))
+        {
+            ProfileNameTP.update(texts, names, n);
+            ProfileNameTP.setState(IPS_OK);
+            ProfileNameTP.apply();
+            return true;
+        }
+
+        // Phase 3: Timer port input
+        if (hasExtendedFirmware && TimerPortTP.isNameMatch(name))
+        {
+            TimerPortTP.update(texts, names, n);
+            TimerPortTP.setState(IPS_OK);
+            TimerPortTP.apply();
             return true;
         }
     }
