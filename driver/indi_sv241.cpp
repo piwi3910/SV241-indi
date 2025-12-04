@@ -198,39 +198,70 @@ bool SV241::openSerialPort()
 {
     const char *portName = PortTP[0].getText();
 
-    PortFD = open(portName, O_RDWR | O_NOCTTY | O_NDELAY);
+    // Open the serial port.
+    // O_RDWR: Open for reading and writing.
+    // O_NOCTTY: The port will not become the process's controlling terminal.
+    PortFD = open(portName, O_RDWR | O_NOCTTY);
     if (PortFD < 0)
     {
         LOGF_ERROR("Error opening serial port %s: %s", portName, strerror(errno));
         return false;
     }
 
-    // Configure serial port: 115200 8N1
+    // Configure serial port for 115200 8N1, raw mode, with HUPCL disabled.
     struct termios options;
     tcgetattr(PortFD, &options);
 
+    // Set baud rates
     cfsetispeed(&options, B115200);
     cfsetospeed(&options, B115200);
 
-    options.c_cflag &= ~PARENB;  // No parity
-    options.c_cflag &= ~CSTOPB;  // 1 stop bit
+    // ---- Control flags (c_cflag) ----
+    options.c_cflag &= ~PARENB; // No parity
+    options.c_cflag &= ~CSTOPB; // 1 stop bit
     options.c_cflag &= ~CSIZE;
-    options.c_cflag |= CS8;       // 8 data bits
-    options.c_cflag &= ~HUPCL;    // IMPORTANT: Disable HUPCL to prevent DTR drop on close, which resets the ESP32
-    options.c_cflag |= CLOCAL;    // Ignore modem control lines
-    options.c_cflag |= CREAD;     // Enable receiver
+    options.c_cflag |= CS8;    // 8 data bits
 
-    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw input
-    options.c_iflag &= ~(IXON | IXOFF | IXANY);          // No software flow control
-    options.c_oflag &= ~OPOST;                            // Raw output
+    // IMPORTANT: Disable HUPCL (Hang-Up on Close).
+    // This prevents the OS from toggling the DTR line when the port is closed,
+    // which would cause the ESP32-based SV241 to reset.
+    options.c_cflag &= ~HUPCL;
 
+    options.c_cflag |= CLOCAL; // Ignore modem control lines.
+    options.c_cflag |= CREAD;  // Enable receiver.
+
+    // ---- Local flags (c_lflag) ----
+    // Set raw input mode: disable canonical mode (line-by-line), echo, and signals.
+    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+
+    // ---- Input flags (c_iflag) ----
+    // Disable software flow control (XON/XOFF).
+    options.c_iflag &= ~(IXON | IXOFF | IXANY);
+
+    // ---- Output flags (c_oflag) ----
+    // Set raw output mode: disable all output processing.
+    options.c_oflag &= ~OPOST;
+
+    // ---- Control characters (c_cc) ----
+    // Configure read behavior.
+    // VMIN = 0, VTIME > 0: `read()` waits for up to VTIME deciseconds for a single byte.
+    // It returns as soon as data is available, or when the timer expires.
     options.c_cc[VMIN] = 0;
-    options.c_cc[VTIME] = 10;  // 1 second timeout
+    options.c_cc[VTIME] = 10; // 1 second timeout (10 * 0.1s)
 
-    tcsetattr(PortFD, TCSANOW, &options);
+    // Apply the new settings immediately.
+    if (tcsetattr(PortFD, TCSANOW, &options) != 0)
+    {
+        LOGF_ERROR("Error setting terminal attributes: %s", strerror(errno));
+        close(PortFD);
+        PortFD = -1;
+        return false;
+    }
+
+    // Flush any pending I/O.
     tcflush(PortFD, TCIOFLUSH);
 
-    LOGF_INFO("Opened serial port %s at 115200 baud", portName);
+    LOGF_INFO("Opened and configured serial port %s at 115200 baud", portName);
     return true;
 }
 
