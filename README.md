@@ -28,54 +28,7 @@ The C++ INDI driver now implements all core functionalities of the device:
 - ✅ State synchronization on connect.
 - ✅ Periodic polling of sensors.
 
-## Repository Structure
-
-The repository has been cleaned up to focus solely on the C++ driver.
-
-```
-sv241-indi/
-├── docs/                   # Protocol documentation
-│   └── SV241_PROTOCOL.md
-├── driver/                 # INDI driver source code (C++)
-│   ├── build/              # Build directory
-│   ├── indi_sv241.cpp      # Driver implementation
-│   ├── indi_sv241.h
-│   └── indi_sv241.xml      # INDI driver definition
-│
-├── test_driver.sh          # Test script for the driver
-└── README.md               # This file
-```
-
-## Technical Deep Dive: The Serial Port Reset Issue
-
-A major hurdle in this project was a hardware-specific issue where the SV241 device would reset upon closing the serial port on POSIX-compliant systems (Linux and macOS). This behavior prevented reliable operation, as any client disconnection would reboot the powerbox, turning off all equipment.
-
-### The Root Cause: `HUPCL` and ESP32 Reset Circuit
-
-- **Device Behavior**: The SV241 is based on an ESP32 microcontroller, which uses a common USB-to-Serial chip (CH340). On these development boards, the DTR (Data Terminal Ready) and RTS (Request To Send) serial lines are often cross-wired to the ESP32's `EN` (Enable) and `GPIO0` pins. This design allows for automatic flashing by using the serial lines to put the chip into bootloader mode.
-
-- **Operating System Behavior**: On Linux and macOS, the default serial port configuration includes the `HUPCL` (Hang-Up on Close) flag. When the last process with an open file handle to the serial port closes it, the OS kernel sends a "hang-up" signal by de-asserting (lowering) the DTR line.
-
-- **The Conflict**: The toggling of the DTR line by the OS on port close was triggering the ESP32's reset-to-bootloader mechanism, causing the entire powerbox to reboot. This is why the device worked on Windows (which does not enforce `HUPCL` in the same way) but failed on POSIX systems.
-
-### The Solution: Manual `termios` Configuration
-
-Standard serial libraries, including the INDI `Connection::Serial` class, do not expose the low-level controls needed to disable the `HUPCL` flag. To solve this, we had to bypass these abstractions and directly configure the serial port using `termios` system calls.
-
-The final C++ driver implements the following logic in its `openSerialPort` method:
-
-1.  **Open the Port**: The serial device file is opened using a standard `open()` system call to get a raw file descriptor.
-2.  **Get Attributes**: The existing terminal attributes are fetched using `tcgetattr()`.
-3.  **Disable `HUPCL`**: The `c_cflag` member of the `termios` struct is modified to remove the `HUPCL` flag. This is the critical step.
-    ```cpp
-    options.c_cflag &= ~HUPCL;
-    ```
-4.  **Set Other Flags**: Baud rate, character size (8N1), and raw input mode are configured.
-5.  **Set Attributes**: The modified attributes are applied back to the port using `tcsetattr()`.
-
-This low-level control prevents the kernel from dropping the DTR line on close, which completely resolves the reset issue and makes the driver stable for INDI use.
-
-## Development
+## Development and Installation
 
 ### Requirements
 - **OS**: Linux or macOS
@@ -83,19 +36,19 @@ This low-level control prevents the kernel from dropping the DTR line on close, 
 - **CMake**: 3.10 or later
 - **INDI Library**: 1.9.0 or later
 
-### Install INDI Library
+### 1. Install Dependencies
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt-get install libindi-dev
+sudo apt-get install build-essential cmake git libindi-dev
 ```
 
 **macOS (Homebrew):**
 ```bash
-brew install indi
+brew install cmake indi
 ```
 
-### Build the Driver
+### 2. Build the Driver
 
 ```bash
 cd driver/build
@@ -104,20 +57,81 @@ make
 ```
 The compiled driver will be located at `driver/build/indi_sv241`.
 
-## Testing the Driver
-
-A test script `test_driver.sh` is provided to perform repeated connect/disconnect cycles and verify the driver's stability.
+### 3. Install the Driver
 
 ```bash
-# Make sure the script is executable
-chmod +x test_driver.sh
-
-# Run the test
-./test_driver.sh driver/build/indi_sv241 "C++ Driver"
+cd driver/build
+sudo make install
 ```
 
-This will:
-1. Start the INDI server with the C++ driver.
-2. Connect to the device and read all sensor/switch states.
-3. Disconnect from the device.
-4. Repeat this cycle 3 times to ensure stability.
+This installs:
+- The `indi_sv241` binary to `/usr/local/bin/`
+- The `indi_sv241.xml` driver definition file to the INDI system directory.
+
+## Usage
+
+### Starting with INDI Server
+
+You can start the driver manually with `indiserver`:
+```bash
+indiserver -v indi_sv241
+```
+
+### Using with KStars/Ekos
+
+1.  Open KStars and go to the Ekos profile editor.
+2.  Create a new profile or edit an existing one.
+3.  Under the "Auxiliary" category, select **SVBONY SV241** from the dropdown menu.
+4.  Start the profile.
+5.  In the INDI Control Panel, go to the **Connection** tab for the SV241 driver.
+6.  Set the correct serial port (e.g., `/dev/tty.usbserial-12340` on macOS or `/dev/ttyUSB0` on Linux).
+7.  Click **Connect**.
+
+## Driver Properties
+
+### Main Control Tab
+
+| Property | Type | Description |
+|----------|------|-------------|
+| DC1-DC5 | Switch | Toggle 12V DC outputs |
+| USB12 | Switch | Toggle USB ports 1-2 |
+| USB345 | Switch | Toggle USB ports 3-4-5 |
+| PWM13 | Number | Adjustable voltage (0-253 = 0-15.3V) |
+| PWM14 | Number | Dew heater 1 duty cycle (0-253) |
+| PWM15 | Number | Dew heater 2 duty cycle (0-253) |
+| PWM13 Voltage | Number | Calculated output voltage (read-only) |
+
+### Sensors Tab
+
+| Property | Type | Description |
+|----------|------|-------------|
+| Voltage | Number | Input voltage (V) |
+| Power | Number | Power consumption (W) |
+| Ambient Temp | Number | Ambient temperature (°C) |
+| Lens Temp | Number | Lens temperature (°C) |
+| Humidity | Number | Relative humidity (%) |
+
+## Troubleshooting
+
+### Driver not found in KStars/Ekos
+
+This usually means the XML file was not installed in a location where the INDI server looks for it.
+1.  Check where INDI looks for XML files: `pkg-config --variable=datadir libindi`
+2.  Ensure `indi_sv241.xml` is in that directory's `indi` subfolder (e.g., `/usr/local/share/indi`).
+3.  If not, run `sudo make install` from the `driver/build` directory again.
+
+### Permission denied on serial port (Linux)
+
+You may need to add your user to the `dialout` group to access serial devices.
+```bash
+sudo usermod -a -G dialout $USER
+```
+You will need to **log out and log back in** for this change to take effect.
+
+## Technical Deep Dive: The Serial Port Reset Issue
+
+A major hurdle in this project was a hardware-specific issue where the SV241 device would reset upon closing the serial port on POSIX-compliant systems (Linux and macOS).
+
+- **The Cause**: On these systems, the default serial port configuration includes the `HUPCL` (Hang-Up on Close) flag. When the port is closed, the OS kernel drops the DTR (Data Terminal Ready) line, which the SV241's ESP32 microcontroller interprets as a reset signal.
+
+- **The Solution**: We bypassed higher-level serial libraries and used low-level `termios` system calls to manually configure the port, specifically disabling the `HUPCL` flag. This prevents the OS from toggling the DTR line and makes the driver connection stable. For more details, see the well-commented `openSerialPort` function in `driver/indi_sv241.cpp`.
