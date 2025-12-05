@@ -23,7 +23,7 @@ This guide provides comprehensive documentation for the SVBONY SV241 Powerbox IN
 
 ## 1. Main Control Tab
 
-![Main Control Tab](../pics/Screenshot%202025-12-05%20at%2011.37.06.png)
+![Main Control Tab](images/Screenshot%202025-12-05%20at%2011.37.06.png)
 
 The Main Control tab provides direct control over all power outputs on the SV241 powerbox.
 
@@ -75,7 +75,7 @@ Variable power outputs using Pulse Width Modulation (0-253 range).
 
 ## 2. General Info Tab
 
-![General Info Tab](../pics/Screenshot%202025-12-05%20at%2011.37.27.png)
+![General Info Tab](images/Screenshot%202025-12-05%20at%2011.37.27.png)
 
 The General Info tab displays driver identification information.
 
@@ -93,7 +93,7 @@ The General Info tab displays driver identification information.
 
 ## 3. Options Tab
 
-![Options Tab](../pics/Screenshot%202025-12-05%20at%2011.37.41.png)
+![Options Tab](images/Screenshot%202025-12-05%20at%2011.37.41.png)
 
 The Options tab provides driver configuration settings and firmware information.
 
@@ -147,7 +147,7 @@ The Options tab provides driver configuration settings and firmware information.
 
 ## 4. Connection Tab
 
-![Connection Tab](../pics/Screenshot%202025-12-05%20at%2011.37.53.png)
+![Connection Tab](images/Screenshot%202025-12-05%20at%2011.37.53.png)
 
 The Connection tab configures the serial port connection to the SV241.
 
@@ -176,7 +176,7 @@ The Connection tab configures the serial port connection to the SV241.
 
 ## 5. Sensors Tab
 
-![Sensors Tab](../pics/Screenshot%202025-12-05%20at%2011.38.05.png)
+![Sensors Tab](images/Screenshot%202025-12-05%20at%2011.38.05.png)
 
 The Sensors tab displays real-time environmental and power readings from the SV241's onboard sensors.
 
@@ -222,7 +222,7 @@ The Sensors tab displays real-time environmental and power readings from the SV2
 
 ## 6. Dew Control Tab
 
-![Dew Control Tab](../pics/Screenshot%202025-12-05%20at%2011.38.15.png)
+![Dew Control Tab](images/Screenshot%202025-12-05%20at%2011.38.15.png)
 
 The Dew Control tab provides automatic dew prevention settings (Extended Firmware only).
 
@@ -264,7 +264,7 @@ PID (Proportional-Integral-Derivative) controller tuning for automatic dew contr
 
 ## 7. Statistics Tab
 
-![Statistics Tab](../pics/Screenshot%202025-12-05%20at%2011.38.27.png)
+![Statistics Tab](images/Screenshot%202025-12-05%20at%2011.38.27.png)
 
 The Statistics tab tracks session metrics (Extended Firmware only).
 
@@ -299,7 +299,7 @@ The Statistics tab tracks session metrics (Extended Firmware only).
 
 ## 8. Diagnostics Tab
 
-![Diagnostics Tab](../pics/Screenshot%202025-12-05%20at%2011.38.39.png)
+![Diagnostics Tab](images/Screenshot%202025-12-05%20at%2011.38.39.png)
 
 The Diagnostics tab provides system health monitoring (Extended Firmware only).
 
@@ -338,7 +338,7 @@ Green = OK, Red = Fault
 
 ## 9. Calibration Tab
 
-![Calibration Tab](../pics/Screenshot%202025-12-05%20at%2011.38.50.png)
+![Calibration Tab](images/Screenshot%202025-12-05%20at%2011.38.50.png)
 
 The Calibration tab allows sensor offset adjustments (Extended Firmware only).
 
@@ -365,7 +365,7 @@ Apply correction offsets to sensor readings:
 
 ## 10. Alerts Tab
 
-![Alerts Tab](../pics/Screenshot%202025-12-05%20at%2011.39.00.png)
+![Alerts Tab](images/Screenshot%202025-12-05%20at%2011.39.00.png)
 
 The Alerts tab configures warning and protection thresholds (Extended Firmware only).
 
@@ -402,7 +402,7 @@ The Alerts tab configures warning and protection thresholds (Extended Firmware o
 
 ## 11. Port Labels Tab
 
-![Port Labels Tab](../pics/Screenshot%202025-12-05%20at%2011.39.12.png)
+![Port Labels Tab](images/Screenshot%202025-12-05%20at%2011.39.12.png)
 
 The Port Labels tab allows customizing port names (Extended Firmware only).
 
@@ -433,7 +433,7 @@ Assign meaningful names to each output:
 
 ## 12. Profiles Tab
 
-![Profiles Tab](../pics/Screenshot%202025-12-05%20at%2011.39.23.png)
+![Profiles Tab](images/Screenshot%202025-12-05%20at%2011.39.23.png)
 
 The Profiles tab manages equipment configuration profiles (Extended Firmware only).
 
@@ -474,7 +474,7 @@ Displays the 4 available profile slots:
 
 ## 13. Timers Tab
 
-![Timers Tab](../pics/Screenshot%202025-12-05%20at%2011.39.32.png)
+![Timers Tab](images/Screenshot%202025-12-05%20at%2011.39.32.png)
 
 The Timers tab allows scheduling delayed power actions (Extended Firmware only).
 
@@ -527,7 +527,7 @@ Displays up to 4 active timer slots showing:
 
 ## 14. Safety Tab
 
-![Safety Tab](../pics/Screenshot%202025-12-05%20at%2011.39.43.png)
+![Safety Tab](images/Screenshot%202025-12-05%20at%2011.39.43.png)
 
 The Safety tab provides watchdog and over-current protection (Extended Firmware only).
 
