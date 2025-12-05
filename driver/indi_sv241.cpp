@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <memory>
 #include <sstream>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -658,12 +659,22 @@ bool SV241::openSerialPort()
 {
     const char *portName = PortTP[0].getText();
 
+    // Open port with O_NOCTTY to prevent it from becoming controlling terminal
     PortFD = open(portName, O_RDWR | O_NOCTTY);
     if (PortFD < 0)
     {
         LOGF_ERROR("Error opening serial port %s: %s", portName, strerror(errno));
         return false;
     }
+
+    // CRITICAL: Set DTR and RTS LOW immediately to prevent ESP32 reset
+    // ESP32 boards with CH340/CP2102 use DTR+RTS for auto-reset during programming.
+    // Opening the serial port can cause DTR to pulse HIGH, resetting the device.
+    int modemBits = 0;
+    ioctl(PortFD, TIOCMGET, &modemBits);
+    modemBits &= ~TIOCM_DTR;  // Clear DTR (set LOW)
+    modemBits &= ~TIOCM_RTS;  // Clear RTS (set LOW)
+    ioctl(PortFD, TIOCMSET, &modemBits);
 
     // Clear non-blocking mode (ensure blocking reads with timeout)
     fcntl(PortFD, F_SETFL, 0);
@@ -679,9 +690,10 @@ bool SV241::openSerialPort()
     options.c_cflag &= ~CSTOPB;  // 1 stop bit
     options.c_cflag &= ~CSIZE;
     options.c_cflag |= CS8;       // 8 data bits
-    options.c_cflag &= ~HUPCL;    // IMPORTANT: Disable HUPCL to prevent DTR drop on close, which resets the ESP32
+    options.c_cflag &= ~HUPCL;    // IMPORTANT: Disable HUPCL to prevent DTR drop on close
     options.c_cflag |= CLOCAL;    // Ignore modem control lines
     options.c_cflag |= CREAD;     // Enable receiver
+    options.c_cflag &= ~CRTSCTS;  // Disable hardware flow control
 
     options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw input
     options.c_iflag &= ~(IXON | IXOFF | IXANY);          // No software flow control
@@ -693,10 +705,16 @@ bool SV241::openSerialPort()
     tcsetattr(PortFD, TCSANOW, &options);
     tcflush(PortFD, TCIOFLUSH);
 
-    // Allow USB serial device to initialize
+    // Ensure DTR/RTS stay LOW after termios configuration
+    ioctl(PortFD, TIOCMGET, &modemBits);
+    modemBits &= ~TIOCM_DTR;
+    modemBits &= ~TIOCM_RTS;
+    ioctl(PortFD, TIOCMSET, &modemBits);
+
+    // Allow USB serial device to stabilize
     usleep(500000);  // 500ms delay
 
-    LOGF_INFO("Opened serial port %s at 115200 baud", portName);
+    LOGF_INFO("Opened serial port %s at 115200 baud (DTR/RTS held LOW)", portName);
     return true;
 }
 
